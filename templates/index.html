@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PQC Benchmarking Tool</title>
+    <style>
+        /* General Page Styling */
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background: linear-gradient(to right, #1e3c72, #2a5298); /* Gradient background */
+            color: white;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* Page Header */
+        h1 {
+            font-size: 3rem;
+            margin-top: 50px;
+            text-shadow: 2px 2px 5px rgba(0, 0, 0, 0.3);
+        }
+
+        /* Select Dropdown */
+        select {
+            font-size: 1.2rem;
+            padding: 10px;
+            border-radius: 5px;
+            border: none;
+            background-color: white;
+            color: black;
+        }
+
+        /* Benchmark Button */
+        button {
+            font-size: 1.2rem;
+            padding: 10px 20px;
+            margin-top: 20px;
+            border: none;
+            border-radius: 5px;
+            background-color: #ff5733;
+            color: white;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+
+        button:hover {
+            background-color: #c70039;
+        }
+
+        /* Result Display */
+        p {
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin-top: 20px;
+        }
+
+        /* Report Link */
+        a {
+            display: block;
+            font-size: 1.2rem;
+            margin-top: 20px;
+            color: #ffcc00;
+            text-decoration: none;
+            font-weight: bold;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        /* Container to Center Content */
+        .container {
+            width: 50%;
+            margin: auto;
+            padding: 50px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.3);
+        }
+    </style>
+    <script>
+        function runBenchmark() {
+            let algorithm = document.getElementById("algo").value;
+            fetch('/benchmark', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({algorithm: algorithm})
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('result').innerText =
+                    "Algorithm: " + data.algorithm +
+                    "\nExecution Time: " + data.time + " sec" +
+                    "\nPower Usage: " + data.power + " W";
+            });
+        }
+    </script>
+</head>
+<body>
+    <div class="container">
+        <h1>PQC Benchmarking Tool</h1>
+        <label for="algo">Select Algorithm:</label>
+        <select id="algo">
+            <option value="Kyber512">Kyber512</option>
+            <option value="Dilithium2">Dilithium2</option>
+            <option value="SPHINCS+-128s">SPHINCS+-128s</option>
+        </select>
+        <br>
+        <button onclick="runBenchmark()">Run Benchmark</button>
+        <p id="result"></p>
+        <a href="/report">View Report</a>
+    </div>
+</body>
+</html>
