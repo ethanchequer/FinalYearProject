@@ -1,7 +1,11 @@
 import sqlite3
+import os
 
-# Connect to database (creates file if not exists)
-conn = sqlite3.connect("../results.db")
+# Ensure the database is in the project directory
+DATABASE_PATH = os.path.join(os.path.dirname(__file__), "../results.db")
+
+# Connect to the database (creates file if it doesn't exist)
+conn = sqlite3.connect(DATABASE_PATH)
 cursor = conn.cursor()
 
 # Create table for storing benchmark results
@@ -28,4 +32,4 @@ cursor.execute('''
 conn.commit()
 conn.close()
 
-print("Database initialized successfully.")
+print(f"Database initialized successfully at {DATABASE_PATH}")

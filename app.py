@@ -1,12 +1,14 @@
 # app.py handles benchmarking and web routes
 # imports Flask and sets up the app
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, # redirect, url_for
+# from flask_socketio import SocketIO, emit
 import time
 import oqs # Python bindings for the OQS library
 import subprocess
 import sqlite3 # SQLite database
 import pandas as pd
-
+import psutil
+# import threading
 app = Flask(__name__)
 
 # Function to connect to the SQLite results database
@@ -23,6 +25,13 @@ def get_all_benchmarks():
     conn.close() # Closes the database connection
     return df # Returns the DataFrame containing all benchmark results
 
+# Function to fetch benchmark results for a specific algorithm from the results database
+def get_cpu():
+    return {
+        "cpu_usage:": psutil.cpu_percent(interval=1),
+        "memory_usage": psutil.virtual_memory().percent,
+        "disk_usage": psutil.disk_usage('/').percent
+    }
 # Home Page (Frontend)
 # Renders index.html when a user visits /
 @app.route('/') # Defines the route for the home page (/)
@@ -57,6 +66,7 @@ def benchmark():
 def benchmark_pqc(algorithm):
     try:
         start_time = time.time()
+        start_cpu = psutil.cpu_percent(interval=None)
 
         if algorithm == "Kyber512":
             kem = oqs.KeyEncapsulation("Kyber512")
@@ -75,11 +85,13 @@ def benchmark_pqc(algorithm):
             return {"error": "Invalid algorithm"}
 
         execution_time = time.time() - start_time
+        end_cpu = psutil.cpu_percent(interval=None)
 
         return {
             "algorithm": algorithm,
             "time": round(execution_time, 4),
-            "power": "N/A"  # Placeholder for power monitoring
+            "cpu_usage": round(end_cpu, 2),
+            "power": "TBD"  # Replace with actual power measurement
         }
 
     except Exception as e:
