@@ -218,5 +218,5 @@ if __name__ == '__main__': # If this script is run directly, start the Flask app
                         # Automatic reloading on code changes.
                         # Error traceback in the browser when exceptions occur
 
-# This version of the app runs the front end. The backend is not operational due to errors with the cpu usage value
-# in the benchmark database and not generating a report.
+# This version of the app runs the front end and the execution time for the PQC benchmarks.
+# Need to develop the back end to implement more metrics and provide more performance insight.
