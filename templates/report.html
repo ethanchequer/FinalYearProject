@@ -34,6 +34,13 @@
             border-radius: 8px;
         }
 
+        /* Table Styling */
+        .table-container {
+            max-height: 400px; /* Allows scrolling */
+            overflow-y: auto;
+            border: 1px solid #ddd;
+        }
+
         table {
             width: 100%;
             border-collapse: collapse;
@@ -49,13 +56,14 @@
         th {
             background-color: #f2f2f2;
             font-weight: bold;
+            text-transform: capitalize; /* Capitalizes headers */
         }
 
         tr:hover {
             background-color: #f9f9f9;
         }
 
-        a {
+        .back-button {
             display: inline-block;
             margin-top: 20px;
             color: #4CAF50;
@@ -64,12 +72,14 @@
             border: 2px solid #4CAF50;
             padding: 10px 20px;
             border-radius: 5px;
+            text-align: center;
         }
 
-        a:hover {
+        .back-button:hover {
             background-color: #4CAF50;
             color: white;
         }
+
     </style>
 </head>
 <body>
@@ -80,8 +90,31 @@
 </header>
 
 <div class="content">
-    {{ tables[0]|safe }}
-    <a href="/">Run Another Test</a>
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Algorithm</th>
+                    <th>Execution Time (s)</th>
+                    <th>Power Usage</th>
+                    <th>Timestamp</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in data %}
+                <tr>
+                    <td>{{ row["id"] }}</td>
+                    <td>{{ row["algorithm"] }}</td>
+                    <td>{{ row["execution_time"] }}</td>
+                    <td>{{ row["power_usage"] }}</td>
+                    <td>{{ row["timestamp"] }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <a href="/" class="back-button">Run Another Test</a>
 </div>
 
 </body>

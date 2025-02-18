@@ -33,25 +33,79 @@ def benchmark_pqc(algorithm):
         start_time = time.time()
         start_cpu = psutil.cpu_percent(interval=None)
 
+
+        # Handle Kyber512
         if algorithm == "Kyber512":
             kem = oqs.KeyEncapsulation("Kyber512")
             public_key = kem.generate_keypair()
             ciphertext, shared_secret_enc = kem.encap_secret(public_key)
             shared_secret_dec = kem.decap_secret(ciphertext)
 
-        elif algorithm in ["Dilithium2", "SPHINCS+-128s"]:
-            sig = oqs.Signature(algorithm)
+
+        # Handle Dilithium2
+        elif algorithm == "Dilithium2":
+            sig = oqs.Signature("Dilithium2")
             message = b"Test message"
 
-            public_key = sig.generate_keypair()
-            signature = sig.sign(message)
-            is_valid = sig.verify(message, signature, public_key)
+            try:
+                public_key = sig.generate_keypair()  # Only public key is returned
+                print(f"✅ Keypair generated for Dilithium2")
+            except Exception as e:
+                print(f"❌ Failed to generate keypair for Dilithium2: {e}")
+                return {"error": f"Failed to generate keypair for Dilithium2: {str(e)}"}
 
-            if not is_valid:
-                return {"error": f"{algorithm} Signature Verification Test Failed!"}
+            try:
+                signature = sig.sign(message)  # No secret key needed
+                print(f"✅ Signature generated for Dilithium2")
+            except Exception as e:
+                print(f"❌ Failed to sign message with Dilithium2: {e}")
+                return {"error": f"Failed to sign message with Dilithium2: {str(e)}"}
 
-        else:
-            return {"error": "Invalid algorithm"}
+            try:
+                is_valid = sig.verify(message, signature, public_key)
+                if not is_valid:
+                    print(f"❌ Signature verification failed for Dilithium2")
+                    return {"error": f"Dilithium2 signature verification failed"}
+                print(f"✅ Signature verified for Dilithium2")
+            except Exception as e:
+                print(f"❌ Failed to verify signature with Dilithium2: {e}")
+                return {"error": f"Failed to verify signature with Dilithium2: {str(e)}"}
+
+
+        # Handle SPHINCS+-128s
+        elif algorithm in ["SPHINCS+-SHA2-128s-simple", "SPHINCS+-SHAKE-128s-simple"]:
+            try:
+                sig = oqs.Signature(algorithm)
+                print(f"✅ SPHINCS+ ({algorithm}) Signature object created")
+            except Exception as e:
+                print(f"❌ Failed to initialize {algorithm}: {e}")
+                return {"error": f"Failed to initialize {algorithm}: {str(e)}"}
+
+            message = b"Test message"
+
+            try:
+                public_key = sig.generate_keypair()  # Only public key is returned
+                print(f"✅ Keypair generated for {algorithm}")
+            except Exception as e:
+                print(f"❌ Failed to generate keypair for {algorithm}: {e}")
+                return {"error": f"Failed to generate keypair for {algorithm}: {str(e)}"}
+
+            try:
+                signature = sig.sign(message)  # No secret key needed
+                print(f"✅ Signature generated for {algorithm}")
+            except Exception as e:
+                print(f"❌ Failed to sign message with {algorithm}: {e}")
+                return {"error": f"Failed to sign message with {algorithm}: {str(e)}"}
+
+            try:
+                is_valid = sig.verify(message, signature, public_key)
+                if not is_valid:
+                    print(f"❌ Signature verification failed for {algorithm}")
+                    return {"error": f"{algorithm} signature verification failed"}
+                print(f"✅ Signature verified for {algorithm}")
+            except Exception as e:
+                print(f"❌ Failed to verify signature with {algorithm}: {e}")
+                return {"error": f"Failed to verify signature with {algorithm}: {str(e)}"}
 
         execution_time = time.time() - start_time
         end_cpu = psutil.cpu_percent(interval=None)
@@ -75,13 +129,16 @@ def run_benchmarks(algorithms):
         result = benchmark_pqc(algorithm)
 
         if "error" not in result:
+            print(f"✅ Inserting {algorithm} into the database")
             conn.execute("INSERT INTO benchmarks (algorithm, execution_time, power_usage) VALUES (?, ?, ?)",
                          (result["algorithm"], result["time"], result["power"]))  # Includes power measurement
             conn.commit()
         else:
-            print:(f"Error running {algorithm}: {result['error']}")
+            print(f"❌ Error running {algorithm}: {result['error']}")
+            socketio.emit("progress", {"message": f"Error: {result['error']}"})  # Display in UI
 
     conn.close()
+
     with app.app_context():
         socketio.emit("progress", {"message": "Completed!"})
         socketio.emit("redirect", {"url": "http://127.0.0.1:5000/report"})  # Redirect to report page
@@ -113,7 +170,7 @@ def benchmark():
 @app.route('/report') # Defines the /report page route
 def generate_report():
     df = get_all_benchmarks() # Calls get_all_benchmarks() to fetch benchmark results from the database
-    return render_template("report.html", tables=[df.to_html()], titles=df.columns.values)
+    return render_template("report.html", data=df.to_dict(orient="records"), titles=df.columns.values)
     # Renders report.html with the fetched benchmark results as tables and column titles
     # tables=[df.to_html()]: Converts the DataFrame to an HTML table
     # titles=df.columns.values: Passes column names for formatting
