@@ -39,21 +39,14 @@
             margin-top: 20px;
             border: none;
             border-radius: 5px;
-            background-color: #ff5733;
+            background-color: #008000; /* Light Green */
             color: white;
             cursor: pointer;
             transition: 0.3s;
         }
 
         button:hover {
-            background-color: #c70039;
-        }
-
-        /* Result Display */
-        p {
-            font-size: 1.5rem;
-            font-weight: bold;
-            margin-top: 20px;
+            background-color: #90ee90; /* Dark Green */
         }
 
         /* Report Link */
@@ -87,13 +80,6 @@
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({algorithm: algorithm})
-            })
-            .then(response => response.json())
-            .then(data => {
-                document.getElementById('result').innerText =
-                    "Algorithm: " + data.algorithm +
-                    "\nExecution Time: " + data.time + " sec" +
-                    "\nPower Usage: " + data.power + " W";
             });
         }
     </script>
@@ -109,7 +95,6 @@
         </select>
         <br>
         <button onclick="runBenchmark()">Run Benchmark</button>
-        <p id="result"></p>
         <a href="/report">View Report</a>
     </div>
 </body>

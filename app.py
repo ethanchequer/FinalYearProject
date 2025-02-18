@@ -42,9 +42,13 @@ def benchmark_pqc(algorithm):
         elif algorithm in ["Dilithium2", "SPHINCS+-128s"]:
             sig = oqs.Signature(algorithm)
             message = b"Test message"
-            public_key, secret_key = sig.generate_keypair()
-            signature = sig.sign(message, secret_key)
+
+            public_key = sig.generate_keypair()
+            signature = sig.sign(message)
             is_valid = sig.verify(message, signature, public_key)
+
+            if not is_valid:
+                return {"error": f"{algorithm} Signature Verification Test Failed!"}
 
         else:
             return {"error": "Invalid algorithm"}
@@ -74,6 +78,8 @@ def run_benchmarks(algorithms):
             conn.execute("INSERT INTO benchmarks (algorithm, execution_time, power_usage) VALUES (?, ?, ?)",
                          (result["algorithm"], result["time"], result["power"]))  # Includes power measurement
             conn.commit()
+        else:
+            print:(f"Error running {algorithm}: {result['error']}")
 
     conn.close()
     with app.app_context():
