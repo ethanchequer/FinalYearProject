@@ -1,19 +1,20 @@
 # app.py handles benchmarking and web routes
 # imports Flask and sets up the app
-from flask import Flask, request, jsonify, render_template
-# from flask_socketio import SocketIO, emit
+from flask import Flask, request, jsonify, render_template, redirect, url_for
+from flask_socketio import SocketIO, emit
 import time
 import oqs # Python bindings for the OQS library
-import subprocess
+# import subprocess
 import sqlite3 # SQLite database
 import pandas as pd
 import psutil
-# import threading
+import threading
 app = Flask(__name__)
+socketio = SocketIO(app)
 
 # Function to connect to the SQLite results database
 def get_db_connection():
-    return sqlite3.connect("results.db")
+    return sqlite3.connect("results.db", check_same_thread=False)
 
 # Function to fetch all benchmark results from the results database
 def get_all_benchmarks():
@@ -25,44 +26,8 @@ def get_all_benchmarks():
     conn.close() # Closes the database connection
     return df # Returns the DataFrame containing all benchmark results
 
-# Function to fetch benchmark results for a specific algorithm from the results database
-def get_cpu():
-    return {
-        "cpu_usage:": psutil.cpu_percent(interval=1),
-        "memory_usage": psutil.virtual_memory().percent,
-        "disk_usage": psutil.disk_usage('/').percent
-    }
-# Home Page (Frontend)
-# Renders index.html when a user visits /
-@app.route('/') # Defines the route for the home page (/)
-def home():
-    return render_template("index.html") # When a user visits /, renders index.html (frontend webpage)
 
-
-# Benchmark Page (Runs PQC Tests)
-
-@app.route('/benchmark', methods=['POST']) # Creates a /benchmark API route that accepts POST requests
-def benchmark():
-    data = request.json
-    algorithm = data.get("algorithm")
-
-    if not algorithm:
-        return jsonify({"error": "No algorithm selected"}), 400
-
-    result = benchmark_pqc(algorithm)
-
-    # Log benchmark results in the database
-    if "error" not in result:
-        conn = get_db_connection()
-        conn.execute("INSERT INTO benchmarks (algorithm, execution_time) VALUES (?, ?)",
-                     (result["algorithm"], result["time"]))
-        conn.commit()
-        conn.close()
-
-    return jsonify(result)
-
-
-# Benchmarking function for PQC algorithms
+# Benchmarking function for PQC algorithms (Runs PQC Tests)
 def benchmark_pqc(algorithm):
     try:
         start_time = time.time()
@@ -96,6 +61,46 @@ def benchmark_pqc(algorithm):
 
     except Exception as e:
         return {"error": str(e)}
+
+
+# Async Function to Run Benchmarks and Update Progress
+def run_benchmarks(algorithms):
+    conn = get_db_connection()
+    for index, algorithm in enumerate(algorithms):
+        socketio.emit("progress", {"message": f"Running {algorithm}..."})
+        result = benchmark_pqc(algorithm)
+
+        if "error" not in result:
+            conn.execute("INSERT INTO benchmarks (algorithm, execution_time, power_usage) VALUES (?, ?, ?)",
+                         (result["algorithm"], result["time"], result["power"]))  # Includes power measurement
+            conn.commit()
+
+    conn.close()
+    with app.app_context():
+        socketio.emit("progress", {"message": "Completed!"})
+        socketio.emit("redirect", {"url": "http://127.0.0.1:5000/report"})  # Redirect to report page
+
+
+# Route for Home Page (Frontend)
+# Renders index.html when a user visits /
+@app.route('/') # Defines the route for the home page (/)
+def home():
+    return render_template("index.html") # When a user visits /, renders index.html (frontend webpage)
+
+
+# Route to Start Benchmarks
+@app.route('/benchmark', methods=['POST']) # Creates a /benchmark API route that accepts POST requests
+def benchmark():
+    data = request.json
+    algorithm = data.get("algorithm")
+
+    if not algorithm:
+        return jsonify({"error": "No algorithm selected"}), 400
+
+    thread = threading.Thread(target=run_benchmarks, args=([algorithm],))
+    thread.start()
+
+    return jsonify({"status": "started"})
 
 
 # Report Page (Shows Test Results)
