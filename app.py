@@ -1,6 +1,6 @@
 # app.py handles benchmarking and web routes
 # imports Flask and sets up the app
-from flask import Flask, request, jsonify, render_template, # redirect, url_for
+from flask import Flask, request, jsonify, render_template
 # from flask_socketio import SocketIO, emit
 import time
 import oqs # Python bindings for the OQS library
@@ -109,6 +109,6 @@ def generate_report():
 
 # Run Flask App
 if __name__ == '__main__': # If this script is run directly, start the Flask app
-    app.run(debug=True) # Enable debug mode for:
+    app.run(host="0.0.0.0", port=5000, debug=True) # Enable debug mode for:
                         # Automatic reloading on code changes.
                         # Error traceback in the browser when exceptions occur
