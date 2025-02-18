@@ -175,6 +175,43 @@ def generate_report():
     # tables=[df.to_html()]: Converts the DataFrame to an HTML table
     # titles=df.columns.values: Passes column names for formatting
 
+
+# Function to send execution time data as JSON for execution time bar chart
+@app.route('/execution_times')
+def get_execution_times():
+    conn = get_db_connection()
+    df = pd.read_sql_query("SELECT algorithm, execution_time FROM benchmarks", conn)
+    conn.close()
+
+    # Convert DataFrame to JSON format
+    data = df.groupby("algorithm")["execution_time"].mean().reset_index().to_dict(orient="records")
+
+    return jsonify(data)
+
+
+# NIST Security Levels Dictionary
+SECURITY_LEVELS = {
+    "Kyber512": 1, "Kyber768": 3, "Kyber1024": 5,
+    "Dilithium2": 2, "Dilithium3": 3, "Dilithium5": 5,
+    "Falcon-512": 1, "Falcon-1024": 5,
+    "SPHINCS+-128s": 1, "SPHINCS+-128f": 1,
+    "SPHINCS+-192s": 3, "SPHINCS+-192f": 3,
+    "SPHINCS+-256s": 5, "SPHINCS+-256f": 5
+}
+
+# API route to return security levels for each algorithm
+@app.route('/security_levels_tested')
+def get_security_levels_tested():
+    conn = get_db_connection()
+    df = pd.read_sql_query("SELECT DISTINCT algorithm FROM benchmarks", conn)
+    conn.close()
+
+    tested_algorithms = df["algorithm"].tolist()
+    tested_security_levels = {alg: SECURITY_LEVELS.get(alg, "Unknown") for alg in tested_algorithms}
+
+    return jsonify(tested_security_levels)
+
+
 # Run Flask App
 if __name__ == '__main__': # If this script is run directly, start the Flask app
     app.run(host="0.0.0.0", port=5000, debug=True) # Enable debug mode for:

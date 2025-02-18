@@ -117,5 +117,87 @@
     <a href="/" class="back-button">Run Another Test</a>
 </div>
 
+<h2>Algorithm Execution Time Comparison</h2>
+<canvas id="executionChart"></canvas>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        fetch('/execution_times')
+            .then(response => response.json())
+            .then(data => {
+                let labels = data.map(item => item.algorithm);
+                let executionTimes = data.map(item => item.execution_time);
+
+                const ctx = document.getElementById('executionChart').getContext('2d');
+                new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Execution Time (s)',
+                            data: executionTimes,
+                            backgroundColor: ['#4CAF50', '#2196F3', '#FFC107'], // Different colors per algorithm
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+            })
+            .catch(error => console.error('Error fetching execution times:', error));
+    });
+</script>
+
+<h2>Algorithm Security Level (NIST)</h2>
+<canvas id="securityChart"></canvas>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        fetch('/security_levels_tested')
+            .then(response => response.json())
+            .then(data => {
+                let labels = Object.keys(data);
+                let securityLevels = Object.values(data);
+
+                if (labels.length === 0) {
+                    document.getElementById('securityChart').style.display = 'none';
+                    return;
+                }
+
+                const ctx = document.getElementById('securityChart').getContext('2d');
+                new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'NIST Security Level',
+                            data: securityLevels,
+                            backgroundColor: ['#4CAF50', '#2196F3', '#FFC107', '#FF5722', '#9C27B0'],
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                max: 5
+                            }
+                        }
+                    }
+                });
+            })
+            .catch(error => console.error('Error fetching security levels:', error));
+    });
+</script>
+
 </body>
 </html>
