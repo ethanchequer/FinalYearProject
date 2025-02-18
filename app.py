@@ -112,3 +112,6 @@ if __name__ == '__main__': # If this script is run directly, start the Flask app
     app.run(host="0.0.0.0", port=5000, debug=True) # Enable debug mode for:
                         # Automatic reloading on code changes.
                         # Error traceback in the browser when exceptions occur
+
+# This version of the app runs the front end. The backend is not operational due to errors with the cpu usage value
+# in the benchmark database and not generating a report.
