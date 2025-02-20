@@ -245,19 +245,26 @@ def generate_report():
 @app.route('/execution_times')
 def get_execution_times():
     conn = get_db_connection()
-    df = pd.read_sql_query(
-        "SELECT algorithm, message_size, AVG(execution_time) AS avg_time FROM pqc_benchmarks GROUP BY algorithm, message_size",
-        conn)
+    df = pd.read_sql_query("SELECT algorithm, execution_time FROM pqc_benchmarks", conn)
     conn.close()
 
-    # Convert to proper JSON format for visualization
-    results = {}
-    for row in df.itertuples():
-        if row.algorithm not in results:
-            results[row.algorithm] = []
-        results[row.algorithm].append({"message_size": row.message_size, "execution_time": row.avg_time})
+    # Keep execution time in seconds (remove microsecond conversion)
+    avg_exec_time = df.groupby("algorithm")["execution_time"].mean().reset_index()
 
-    return jsonify(results)
+    print("Execution Times API Response:", avg_exec_time.to_dict(orient="records"))  # Debugging
+
+    return jsonify(avg_exec_time.to_dict(orient="records"))
+
+@app.route('/execution_vs_cpu')
+def get_execution_vs_cpu():
+    conn = get_db_connection()
+    df = pd.read_sql_query("SELECT algorithm, execution_time, cpu_usage FROM pqc_benchmarks", conn)
+    conn.close()
+
+    # Convert execution time from seconds to microseconds (µs)
+    df["execution_time"] = df["execution_time"] * 1_000_000  # Convert to µs
+
+    return jsonify(df.to_dict(orient="records"))
 
 
 # API route to return security levels for each algorithm
@@ -300,5 +307,5 @@ if __name__ == '__main__': # If this script is run directly, start the Flask app
                         # Automatic reloading on code changes.
                         # Error traceback in the browser when exceptions occur
 
-# This version of the app runs the front end and the execution time for the PQC benchmarks.
+# This version of the app runs the execution time, CPU, memory and power usage for the PQC benchmarks.
 # Need to develop the back end to implement more metrics and provide more performance insight.

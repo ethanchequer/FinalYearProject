@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PQC Benchmark Report</title>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body {
             font-family: 'Roboto', sans-serif;
@@ -13,18 +14,12 @@
             margin: 0;
             padding: 0;
         }
-
         header {
             background-color: #4CAF50;
             color: white;
             text-align: center;
             padding: 20px;
         }
-
-        h1, h2 {
-            margin: 0;
-        }
-
         .content {
             max-width: 900px;
             margin: 30px auto;
@@ -33,36 +28,28 @@
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
             border-radius: 8px;
         }
-
-        /* Table Styling */
         .table-container {
-            max-height: 400px; /* Allows scrolling */
+            max-height: 400px;
             overflow-y: auto;
             border: 1px solid #ddd;
         }
-
         table {
             width: 100%;
             border-collapse: collapse;
             margin-top: 20px;
         }
-
         th, td {
             padding: 12px 15px;
             text-align: left;
             border-bottom: 1px solid #ddd;
         }
-
         th {
             background-color: #f2f2f2;
             font-weight: bold;
-            text-transform: capitalize; /* Capitalizes headers */
         }
-
         tr:hover {
             background-color: #f9f9f9;
         }
-
         .back-button {
             display: inline-block;
             margin-top: 20px;
@@ -74,21 +61,17 @@
             border-radius: 5px;
             text-align: center;
         }
-
         .back-button:hover {
             background-color: #4CAF50;
             color: white;
         }
-
     </style>
 </head>
 <body>
-
 <header>
     <h1>PQC Benchmark Report</h1>
     <h2>Performance Results</h2>
 </header>
-
 <div class="content">
     <div class="table-container">
         <table>
@@ -97,7 +80,7 @@
                     <th>ID</th>
                     <th>Algorithm</th>
                     <th>Message Size (Bytes)</th>
-                    <th>Execution Time (s)</th>
+                    <th>Execution Time (µs)</th>
                     <th>CPU Usage (%)</th>
                     <th>Memory Usage (MB)</th>
                     <th>Power Usage</th>
@@ -110,7 +93,7 @@
                     <td>{{ row["id"] }}</td>
                     <td>{{ row["algorithm"] }}</td>
                     <td>{{ row["message_size"] }}</td>
-                    <td>{{ row["execution_time"] }}</td>
+                    <td>{{ "%.3f" | format(row["execution_time"] * 1000) }}</td>  <!-- Convert s to ms -->
                     <td>{{ row['cpu_usage'] }}</td>
                     <td>{{ row['memory_usage'] }}</td>
                     <td>{{ row["power_usage"] }}</td>
@@ -122,94 +105,89 @@
     </div>
     <a href="/" class="back-button">Run Another Test</a>
 </div>
-
-<h2>Algorithm Execution Time Comparison</h2>
+<h2>Average Algorithm Execution Time</h2>
 <canvas id="executionChart"></canvas>
-
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
     document.addEventListener("DOMContentLoaded", function() {
-    fetch('/execution_times')
-        .then(response => response.json())
-        .then(data => {
-            let datasets = [];
-            let messageSizes = [32, 256, 1024, 4096]; // Ensure all message sizes are covered
+        fetch('/execution_times')
+    .then(response => response.json())
+    .then(data => {
+        console.log("Execution Time Data:", data);  // Debugging
+        let labels = data.map(item => item.algorithm);
+        let executionTimes = data.map(item => item.execution_time);
 
-            Object.keys(data).forEach(algorithm => {
-                let executionTimes = messageSizes.map(size => {
-                    let entry = data[algorithm].find(e => e.message_size === size);
-                    return entry ? entry.execution_time : 0;
-                });
-
-                datasets.push({
-                    label: algorithm,
+        const ctx = document.getElementById('executionChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Execution Time (s)',  // Changed from µs to s
                     data: executionTimes,
+                    backgroundColor: ['#4CAF50', '#2196F3', '#FFC107'],
                     borderWidth: 1
-                });
-            });
-
-            const ctx = document.getElementById('executionChart').getContext('2d');
-            new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: messageSizes.map(size => size + " Bytes"),
-                    datasets: datasets
-                },
-                options: {
-                    responsive: true,
-                    scales: {
-                        y: { beginAtZero: true }
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: true
                     }
                 }
-            });
-        })
-        .catch(error => console.error('Error fetching execution times:', error));
-});
+            }
+        });
+    })
+    .catch(error => console.error('Error fetching execution times:', error));
+    });
 </script>
-
-<h2>Algorithm Security Level (NIST)</h2>
-<canvas id="securityChart"></canvas>
-
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<h2>Execution Time vs CPU Usage</h2>
+<canvas id="scatterChart"></canvas>
 <script>
     document.addEventListener("DOMContentLoaded", function() {
-        fetch('/security_levels_tested')
+        fetch('/execution_vs_cpu')
             .then(response => response.json())
             .then(data => {
-                let labels = Object.keys(data);
-                let securityLevels = Object.values(data);
-
-                if (labels.length === 0) {
-                    document.getElementById('securityChart').style.display = 'none';
-                    return;
-                }
-
-                const ctx = document.getElementById('securityChart').getContext('2d');
+                let datasets = {};
+                data.forEach(item => {
+                    if (!datasets[item.algorithm]) {
+                        datasets[item.algorithm] = { label: item.algorithm, data: [], backgroundColor: '' };
+                    }
+                    datasets[item.algorithm].data.push({ x: item.cpu_usage, y: item.execution_time });
+                });
+                const ctx = document.getElementById('scatterChart').getContext('2d');
                 new Chart(ctx, {
-                    type: 'bar',
+                    type: 'scatter',
                     data: {
-                        labels: labels,
-                        datasets: [{
-                            label: 'NIST Security Level',
-                            data: securityLevels,
-                            backgroundColor: ['#4CAF50', '#2196F3', '#FFC107', '#FF5722', '#9C27B0'],
-                            borderWidth: 1
-                        }]
+                        datasets: Object.values(datasets).map((dataset, i) => ({
+                            label: dataset.label,
+                            data: dataset.data,
+                            backgroundColor: ['#4CAF50', '#2196F3', '#FFC107', '#FF5722', '#9C27B0'][i % 5]
+                        }))
                     },
                     options: {
                         responsive: true,
                         scales: {
+                            x: {
+                                type: 'linear',
+                                position: 'bottom',
+                                title: {
+                                    display: true,
+                                    text: 'Execution Time (µs)'
+                                }
+                            },
                             y: {
-                                beginAtZero: true,
-                                max: 5
+                                title: {
+                                    display: true,
+                                    text: 'CPU Usage (%)'
+                                }
                             }
                         }
                     }
                 });
             })
-            .catch(error => console.error('Error fetching security levels:', error));
+            .catch(error => console.error('Error fetching execution vs CPU data:', error));
     });
 </script>
-
 </body>
 </html>
