@@ -4,7 +4,7 @@ from flask import Flask, request, jsonify, render_template, redirect, url_for
 from flask_socketio import SocketIO, emit
 import time
 import oqs # Python bindings for the OQS library
-# import subprocess
+import os
 import sqlite3 # SQLite database
 import pandas as pd
 import psutil
@@ -14,7 +14,7 @@ socketio = SocketIO(app)
 
 # Function to connect to the SQLite results database
 def get_db_connection():
-    return sqlite3.connect("results.db", check_same_thread=False)
+    return sqlite3.connect("benchmarks.db", check_same_thread=False)
 
 # Function to fetch all benchmark results from the results database
 def get_all_benchmarks():
@@ -31,10 +31,12 @@ def get_all_benchmarks():
 def benchmark_pqc(algorithm):
     try:
         start_time = time.time()
-        start_cpu = psutil.cpu_percent(interval=None)
+        process = psutil.Process() # Get current process information
+        start_cpu = psutil.cpu_percent(interval=None) # Measure CPU before execution
+        start_mem = process.memory_info().rss / (1024 * 1024) # Convert bytes to MB
 
 
-        # Handle Kyber512
+        # Handle Kyber512 algorithm
         if algorithm == "Kyber512":
             kem = oqs.KeyEncapsulation("Kyber512")
             public_key = kem.generate_keypair()
@@ -42,7 +44,7 @@ def benchmark_pqc(algorithm):
             shared_secret_dec = kem.decap_secret(ciphertext)
 
 
-        # Handle Dilithium2
+        # Handle Dilithium2 algorithm
         elif algorithm == "Dilithium2":
             sig = oqs.Signature("Dilithium2")
             message = b"Test message"
@@ -72,7 +74,7 @@ def benchmark_pqc(algorithm):
                 return {"error": f"Failed to verify signature with Dilithium2: {str(e)}"}
 
 
-        # Handle SPHINCS+-128s
+        # Handle SPHINCS+-128s algorithm
         elif algorithm in ["SPHINCS+-SHA2-128s-simple", "SPHINCS+-SHAKE-128s-simple"]:
             try:
                 sig = oqs.Signature(algorithm)
@@ -107,14 +109,24 @@ def benchmark_pqc(algorithm):
                 print(f"❌ Failed to verify signature with {algorithm}: {e}")
                 return {"error": f"Failed to verify signature with {algorithm}: {str(e)}"}
 
+        # Measure CPU and Memory usage after execution
         execution_time = time.time() - start_time
-        end_cpu = psutil.cpu_percent(interval=None)
+        end_cpu = psutil.cpu_percent(interval=None) # Measure CPU after execution
+        end_mem = process.memory_info().rss / (1024 * 1024) # Convert bytes to MB
+
+        # Calculate resource usage
+        cpu_usage = max(end_cpu - start_cpu, 2) # Avoid negative values
+        memory_usage = round(end_mem - start_mem, 2)
+
+        # Measure power consumption (for Raspberry Pi)
+        power_usage = get_power_usage()
 
         return {
             "algorithm": algorithm,
             "time": round(execution_time, 4),
-            "cpu_usage": round(end_cpu, 2),
-            "power": "TBD"  # Replace with actual power measurement
+            "cpu_usage": cpu_usage,
+            "memory_usage": memory_usage,
+            "power": power_usage  # Replace with actual power measurement
         }
 
     except Exception as e:
@@ -130,8 +142,11 @@ def run_benchmarks(algorithms):
 
         if "error" not in result:
             print(f"✅ Inserting {algorithm} into the database")
-            conn.execute("INSERT INTO benchmarks (algorithm, execution_time, power_usage) VALUES (?, ?, ?)",
-                         (result["algorithm"], result["time"], result["power"]))  # Includes power measurement
+            conn.execute("""
+                        INSERT INTO benchmarks (algorithm, execution_time, power_usage, cpu_usage, memory_usage)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (
+            result["algorithm"], result["time"], result["power"], result["cpu_usage"], result["memory_usage"]))
             conn.commit()
         else:
             print(f"❌ Error running {algorithm}: {result['error']}")
@@ -142,6 +157,27 @@ def run_benchmarks(algorithms):
     with app.app_context():
         socketio.emit("progress", {"message": "Completed!"})
         socketio.emit("redirect", {"url": "http://127.0.0.1:5000/report"})  # Redirect to report page
+
+
+# Read power stats from the Raspberry Pi
+def get_power_usage():
+    try:
+        power_file = "/sys/class/power_supply/battery/voltage_now"
+        if os.path.exists(power_file):
+            with open(power_file, "r") as f:
+                voltage = int(f.read().strip()) / 1e6  # Convert µV to V
+
+            current_file = "/sys/class/power_supply/battery/current_now"
+            if os.path.exists(current_file):
+                with open(current_file, "r") as f:
+                    current = int(f.read().strip()) / 1e6  # Convert µA to A
+
+                power_usage = round(voltage * current, 2)  # Compute Power (W)
+                return power_usage
+        return "Not Available"
+    except Exception:
+        return "Error"
+
 
 
 # Route for Home Page (Frontend)
@@ -210,6 +246,18 @@ def get_security_levels_tested():
     tested_security_levels = {alg: SECURITY_LEVELS.get(alg, "Unknown") for alg in tested_algorithms}
 
     return jsonify(tested_security_levels)
+
+# API route to access collected CPU and memory data
+@app.route('/cpu_memory_usage')
+def get_cpu_memory_usage():
+    conn = get_db_connection()
+    df = pd.read_sql_query("SELECT algorithm, cpu_usage, memory_usage FROM benchmarks", conn)
+    conn.close()
+
+    # Convert DataFrame to JSON format
+    data = df.groupby("algorithm").mean().reset_index().to_dict(orient="records")
+
+    return jsonify(data)
 
 
 # Run Flask App

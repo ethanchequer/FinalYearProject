@@ -97,6 +97,8 @@
                     <th>ID</th>
                     <th>Algorithm</th>
                     <th>Execution Time (s)</th>
+                    <th>CPU Usage (%)</th>
+                    <th>Memory Usage (MB)</th>
                     <th>Power Usage</th>
                     <th>Timestamp</th>
                 </tr>
@@ -107,6 +109,8 @@
                     <td>{{ row["id"] }}</td>
                     <td>{{ row["algorithm"] }}</td>
                     <td>{{ row["execution_time"] }}</td>
+                    <td>{{ row['cpu_usage'] }}</td>
+                    <td>{{ row['memory_usage'] }}</td>
                     <td>{{ row["power_usage"] }}</td>
                     <td>{{ row["timestamp"] }}</td>
                 </tr>
