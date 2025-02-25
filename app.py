@@ -14,6 +14,10 @@ socketio = SocketIO(app)
 
 # Define the number of trials per test to improve accuracy
 NUM_TRIALS = 10
+
+# Available application types for testing
+APPLICATION_TYPES = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"]
+
 # Different message sizes to run multiple tests
 MESSAGE_SIZES = [32, 256, 1024, 40968192, 16384, 32768, 65536]  # Byte sizes to test (32B, 256B, 1KB, 4KB)
 
@@ -63,7 +67,7 @@ def get_all_benchmarks():
 
 
 # Benchmarking function for PQC algorithms (Runs PQC Tests)
-def benchmark_pqc(algorithm):
+def benchmark_pqc(algorithm, application):
     try:
         process = psutil.Process() # Get current process information
         results = []
@@ -82,7 +86,7 @@ def benchmark_pqc(algorithm):
             def measure_pqc():
                 time.sleep(0.05)  # Small delay to stabilize thread execution
                 start_time = time.perf_counter_ns()  # Higher precision timing
-                start_cpu = psutil.cpu_percent(interval=None)
+                start_cpu = psutil.cpu_percent(interval=0.5) or 0.0 # Ensures no blank values
                 start_mem = process.memory_info().rss / (1024 * 1024)  # MB
 
                 # Handle Kyber512 algorithm
@@ -150,7 +154,6 @@ def benchmark_pqc(algorithm):
                         return {"error": f"Failed to verify signature with {algorithm}: {str(e)}"}
 
                 execution_time = (time.perf_counter_ns() - start_time) / 1e9  # Convert ns to seconds
-                cpu_usage = psutil.cpu_percent(interval=0.5) or 0.0  # Ensure no blank values  # Increased interval for better accuracy
                 cpu_usage_per_core = psutil.cpu_percent(interval=0.1, percpu=True)
                 avg_cpu_usage = sum(cpu_usage_per_core) / max(len(cpu_usage_per_core), 1)  # Prevent division by zero
                 end_mem = process.memory_info().rss / (1024 * 1024)
@@ -179,9 +182,10 @@ def benchmark_pqc(algorithm):
                 len([x for x in power_usages if isinstance(x, (int, float))]), 1) if any(
                 isinstance(x, (int, float)) for x in power_usages) else "Not Available"
 
-            results.append((size, avg_execution_time, avg_cpu_usage, avg_memory_usage, avg_power_usage))
+            results.append((size, avg_execution_time, avg_cpu_usage, avg_memory_usage, avg_power_usage, application))
         return {
             "algorithm": algorithm,
+            "application": application,
             "results": results  # Store different message size results
         }
     except Exception as e:
@@ -210,12 +214,12 @@ def get_power_usage():
 
 
 # Async Function to Run Benchmarks and Update Progress
-def run_benchmarks(algorithms):
+def run_benchmarks(algorithms, application):
     conn = get_db_connection()
 
     for algorithm in algorithms:
         socketio.emit("progress", {"message": f"Running {algorithm}..."})
-        result = benchmark_pqc(algorithm)
+        result = benchmark_pqc(algorithm, application)
 
         if "error" not in result:
             print(f"✅ Inserting {algorithm} results into the database")
@@ -246,7 +250,7 @@ def run_benchmarks(algorithms):
 # Renders index.html when a user visits /
 @app.route('/') # Defines the route for the home page (/)
 def home():
-    return render_template("index.html") # When a user visits /, renders index.html (frontend webpage)
+    return render_template("index.html", applications=APPLICATION_TYPES) # Pass available application types to the UI
 
 
 # Route to Start Benchmarks
@@ -254,11 +258,12 @@ def home():
 def benchmark():
     data = request.json
     algorithm = data.get("algorithm")
+    application = data.get("application")
 
-    if not algorithm:
-        return jsonify({"error": "No algorithm selected"}), 400
+    if not algorithm or not application:
+        return jsonify({"error": "Algorithm or application not selected"}), 400
 
-    thread = threading.Thread(target=run_benchmarks, args=([algorithm],))
+    thread = threading.Thread(target=run_benchmarks, args=([algorithm], application))
     thread.start()
 
     return jsonify({"status": "started"})
@@ -341,4 +346,5 @@ if __name__ == '__main__': # If this script is run directly, start the Flask app
                         # Error traceback in the browser when exceptions occur
 
 # This version of the app runs the execution time, CPU, memory and power usage for the PQC benchmarks.
-# Need to develop the back end to implement more metrics and provide more performance insight.
+# Execution time is the only calculation concern...
+# Next step is to include application traffic
