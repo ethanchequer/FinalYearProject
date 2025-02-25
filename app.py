@@ -12,8 +12,14 @@ import threading
 app = Flask(__name__)
 socketio = SocketIO(app)
 
+# Define the number of trials per test to improve accuracy
+NUM_TRIALS = 10
 # Different message sizes to run multiple tests
 MESSAGE_SIZES = [32, 256, 1024, 40968192, 16384, 32768, 65536]  # Byte sizes to test (32B, 256B, 1KB, 4KB)
+
+############
+# DATABASE #
+############
 
 # Function to connect to the SQLite results database
 def get_db_connection():
@@ -41,12 +47,15 @@ def initialize_database():
     conn.commit()
     conn.close()
 
+##############
+# BENCHMARKS #
+##############
 
 # Function to fetch all benchmark results from the results database
 def get_all_benchmarks():
     conn = get_db_connection() # Connect to the database
     df = pd.read_sql_query("SELECT * FROM pqc_benchmarks ORDER BY timestamp DESC, message_size ASC", conn)
-    # Executes an SQL query to retrieve all records from the benchmarks table
+    # Executes an SQL query to retrieve all records from the pqc_benchmarks table
     # sorted by timestamp in descending order (newest results first)
     # Returns the results as a pandas DataFrame
     conn.close() # Closes the database connection
@@ -61,98 +70,120 @@ def benchmark_pqc(algorithm):
 
         for size in MESSAGE_SIZES:
             message = bytes(size)  # Generate a message of the given size
-            start_time = time.time()
-            start_cpu = psutil.cpu_percent(interval=None)
-            start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+            execution_times = []
+            cpu_usages = []
+            memory_usages = []
+            power_usages = []
 
-            # Handle Kyber512 algorithm
-            if algorithm == "Kyber512":
-                kem = oqs.KeyEncapsulation("Kyber512")
-                public_key = kem.generate_keypair()
-                ciphertext, shared_secret_enc = kem.encap_secret(public_key)
-                shared_secret_dec = kem.decap_secret(ciphertext)
+            # Warm-up cycle to flush CPU cache effects
+            for _ in range(3):
+                _ = bytes(size)  # Force memory allocation
 
+            def measure_pqc():
+                time.sleep(0.05)  # Small delay to stabilize thread execution
+                start_time = time.perf_counter_ns()  # Higher precision timing
+                start_cpu = psutil.cpu_percent(interval=None)
+                start_mem = process.memory_info().rss / (1024 * 1024)  # MB
 
-            # Handle Dilithium2 algorithm
-            elif algorithm == "Dilithium2":
-                sig = oqs.Signature("Dilithium2")
-                try:
-                    public_key = sig.generate_keypair()  # Only public key is returned
-                    print(f"✅ Keypair generated for Dilithium2")
-                except Exception as e:
-                    print(f"❌ Failed to generate keypair for Dilithium2: {e}")
-                    return {"error": f"Failed to generate keypair for Dilithium2: {str(e)}"}
-                try:
-                    signature = sig.sign(message)  # No secret key needed
-                    print(f"✅ Signature generated for Dilithium2")
-                except Exception as e:
-                    print(f"❌ Failed to sign message with Dilithium2: {e}")
-                    return {"error": f"Failed to sign message with Dilithium2: {str(e)}"}
-                try:
-                    is_valid = sig.verify(message, signature, public_key)
-                    if not is_valid:
-                        print(f"❌ Signature verification failed for Dilithium2")
-                        return {"error": f"Dilithium2 signature verification failed"}
-                    print(f"✅ Signature verified for Dilithium2")
-                except Exception as e:
-                    print(f"❌ Failed to verify signature with Dilithium2: {e}")
-                    return {"error": f"Failed to verify signature with Dilithium2: {str(e)}"}
+                # Handle Kyber512 algorithm
+                if algorithm == "Kyber512":
+                    kem = oqs.KeyEncapsulation("Kyber512")
+                    public_key = kem.generate_keypair()
+                    ciphertext, shared_secret_enc = kem.encap_secret(public_key)
+                    shared_secret_dec = kem.decap_secret(ciphertext)
 
 
-            # Handle SPHINCS+-128s algorithm
-            elif algorithm in ["SPHINCS+-SHA2-128s-simple", "SPHINCS+-SHAKE-128s-simple"]:
-                try:
-                    sig = oqs.Signature(algorithm)
-                    print(f"✅ SPHINCS+ ({algorithm}) Signature object created")
-                except Exception as e:
-                    print(f"❌ Failed to initialize {algorithm}: {e}")
-                    return {"error": f"Failed to initialize {algorithm}: {str(e)}"}
-                try:
-                    public_key = sig.generate_keypair()  # Only public key is returned
-                    print(f"✅ Keypair generated for {algorithm}")
-                except Exception as e:
-                    print(f"❌ Failed to generate keypair for {algorithm}: {e}")
-                    return {"error": f"Failed to generate keypair for {algorithm}: {str(e)}"}
-                try:
-                    signature = sig.sign(message)  # No secret key needed
-                    print(f"✅ Signature generated for {algorithm}")
-                except Exception as e:
-                    print(f"❌ Failed to sign message with {algorithm}: {e}")
-                    return {"error": f"Failed to sign message with {algorithm}: {str(e)}"}
-                try:
-                    is_valid = sig.verify(message, signature, public_key)
-                    if not is_valid:
-                        print(f"❌ Signature verification failed for {algorithm}")
-                        return {"error": f"{algorithm} signature verification failed"}
-                    print(f"✅ Signature verified for {algorithm}")
-                except Exception as e:
-                    print(f"❌ Failed to verify signature with {algorithm}: {e}")
-                    return {"error": f"Failed to verify signature with {algorithm}: {str(e)}"}
+                # Handle Dilithium2 algorithm
+                elif algorithm == "Dilithium2":
+                    sig = oqs.Signature("Dilithium2")
+                    try:
+                        public_key = sig.generate_keypair()  # Only public key is returned
+                        print(f"✅ Keypair generated for Dilithium2")
+                    except Exception as e:
+                        print(f"❌ Failed to generate keypair for Dilithium2: {e}")
+                        return {"error": f"Failed to generate keypair for Dilithium2: {str(e)}"}
+                    try:
+                        signature = sig.sign(message)  # No secret key needed
+                        print(f"✅ Signature generated for Dilithium2")
+                    except Exception as e:
+                        print(f"❌ Failed to sign message with Dilithium2: {e}")
+                        return {"error": f"Failed to sign message with Dilithium2: {str(e)}"}
+                    try:
+                        is_valid = sig.verify(message, signature, public_key)
+                        if not is_valid:
+                            print(f"❌ Signature verification failed for Dilithium2")
+                            return {"error": f"Dilithium2 signature verification failed"}
+                        print(f"✅ Signature verified for Dilithium2")
+                    except Exception as e:
+                        print(f"❌ Failed to verify signature with Dilithium2: {e}")
+                        return {"error": f"Failed to verify signature with Dilithium2: {str(e)}"}
 
-            # Measure execution time
-            execution_time = time.time() - start_time
 
-            # Measure CPU usage over a short interval
-            cpu_usage = psutil.cpu_percent(interval=0.1)  # More accurate
+                # Handle SPHINCS+-128s algorithm
+                elif algorithm in ["SPHINCS+-SHA2-128s-simple", "SPHINCS+-SHAKE-128s-simple"]:
+                    try:
+                        sig = oqs.Signature(algorithm)
+                        print(f"✅ SPHINCS+ ({algorithm}) Signature object created")
+                    except Exception as e:
+                        print(f"❌ Failed to initialize {algorithm}: {e}")
+                        return {"error": f"Failed to initialize {algorithm}: {str(e)}"}
+                    try:
+                        public_key = sig.generate_keypair()  # Only public key is returned
+                        print(f"✅ Keypair generated for {algorithm}")
+                    except Exception as e:
+                        print(f"❌ Failed to generate keypair for {algorithm}: {e}")
+                        return {"error": f"Failed to generate keypair for {algorithm}: {str(e)}"}
+                    try:
+                        signature = sig.sign(message)  # No secret key needed
+                        print(f"✅ Signature generated for {algorithm}")
+                    except Exception as e:
+                        print(f"❌ Failed to sign message with {algorithm}: {e}")
+                        return {"error": f"Failed to sign message with {algorithm}: {str(e)}"}
+                    try:
+                        is_valid = sig.verify(message, signature, public_key)
+                        if not is_valid:
+                            print(f"❌ Signature verification failed for {algorithm}")
+                            return {"error": f"{algorithm} signature verification failed"}
+                        print(f"✅ Signature verified for {algorithm}")
+                    except Exception as e:
+                        print(f"❌ Failed to verify signature with {algorithm}: {e}")
+                        return {"error": f"Failed to verify signature with {algorithm}: {str(e)}"}
 
-            # Measure per-core CPU usage
-            cpu_usage_per_core = psutil.cpu_percent(interval=0.1, percpu=True)
-            avg_cpu_usage = sum(cpu_usage_per_core) / len(cpu_usage_per_core)
+                execution_time = (time.perf_counter_ns() - start_time) / 1e9  # Convert ns to seconds
+                cpu_usage = psutil.cpu_percent(interval=0.5) or 0.0  # Ensure no blank values  # Increased interval for better accuracy
+                cpu_usage_per_core = psutil.cpu_percent(interval=0.1, percpu=True)
+                avg_cpu_usage = sum(cpu_usage_per_core) / max(len(cpu_usage_per_core), 1)  # Prevent division by zero
+                end_mem = process.memory_info().rss / (1024 * 1024)
+                power_usage = get_power_usage()
+                system_load = psutil.getloadavg()[0]  # Measure system load
 
-            # Measure memory usage after execution
-            end_mem = process.memory_info().rss / (1024 * 1024)
+                execution_times.append(execution_time)
+                cpu_usages.append(avg_cpu_usage)
+                memory_usages.append(end_mem)
+                power_usages.append(power_usage)
 
-            # Measure power consumption
-            power_usage = get_power_usage()
+            threads = []
+            for _ in range(NUM_TRIALS):  # Run multiple trials
+                thread = threading.Thread(target=measure_pqc)
+                thread.start()
+                threads.append(thread)
 
-            # Store results
-            results.append((size, execution_time, avg_cpu_usage, end_mem, power_usage))
+            for thread in threads:
+                thread.join()
 
+            # Compute averages across multiple trials for consistency
+            avg_execution_time = sum(execution_times) / NUM_TRIALS
+            avg_cpu_usage = sum(cpu_usages) /  max(len(cpu_usages), 1)  # Prevent division by zero
+            avg_memory_usage = sum(memory_usages) / NUM_TRIALS
+            avg_power_usage = sum([x for x in power_usages if isinstance(x, (int, float))]) / max(
+                len([x for x in power_usages if isinstance(x, (int, float))]), 1) if any(
+                isinstance(x, (int, float)) for x in power_usages) else "Not Available"
+
+            results.append((size, avg_execution_time, avg_cpu_usage, avg_memory_usage, avg_power_usage))
         return {
             "algorithm": algorithm,
-            "results": results # Store different message size results
+            "results": results  # Store different message size results
         }
-
     except Exception as e:
         return {"error": str(e)}
 
@@ -207,7 +238,9 @@ def run_benchmarks(algorithms):
 
 
 
-
+##########
+# ROUTES #
+##########
 
 # Route for Home Page (Frontend)
 # Renders index.html when a user visits /
