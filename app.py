@@ -66,11 +66,41 @@ def get_all_benchmarks():
     return df # Returns the DataFrame containing all benchmark results
 
 
+# Traffic capture function based on application type
+def capture_traffic(application):
+    pcap_file = f"{application.replace(' ', '_').lower()}_traffic.pcap"
+    try:
+        if application == "Video Streaming":
+            subprocess.Popen(["ffmpeg", "-i", "input.mp4", "-f", "mpegts", "udp://127.0.0.1:1234"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(["tcpdump", "-i", "wlan0", "-w", pcap_file], stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+
+        elif application == "File Transfer":
+            subprocess.Popen(["iperf3", "-s"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(["tcpdump", "-i", "wlan0", "-w", pcap_file], stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+
+        elif application == "VoIP":
+            subprocess.Popen(["tcpdump", "-i", "wlan0", "port", "5060", "-w", pcap_file], stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+
+        elif application == "Web Browsing":
+            subprocess.Popen(["tcpdump", "-i", "wlan0", "port", "80", "or", "port", "443", "-w", pcap_file],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        return pcap_file
+    except Exception as e:
+        return str(e)
+
+
 # Benchmarking function for PQC algorithms (Runs PQC Tests)
 def benchmark_pqc(algorithm, application):
     try:
         process = psutil.Process() # Get current process information
         results = []
+
+        pcap_file = capture_traffic(application)  # Capture traffic
 
         for size in MESSAGE_SIZES:
             message = bytes(size)  # Generate a message of the given size
@@ -186,6 +216,7 @@ def benchmark_pqc(algorithm, application):
         return {
             "algorithm": algorithm,
             "application": application,
+            "pcap_file": pcap_file,
             "results": results  # Store different message size results
         }
     except Exception as e:
@@ -266,7 +297,7 @@ def benchmark():
     thread = threading.Thread(target=run_benchmarks, args=([algorithm], application))
     thread.start()
 
-    return jsonify({"status": "started"})
+    return jsonify({"status": "started"}) 
 
 
 # Report Page (Shows Test Results)
