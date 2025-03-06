@@ -5,10 +5,13 @@ from flask_socketio import SocketIO, emit
 import time
 import oqs # Python bindings for the OQS library
 import os
+import subprocess
+import pyshark
 import sqlite3 # SQLite database
 import pandas as pd
 import psutil
 import threading
+
 app = Flask(__name__)
 socketio = SocketIO(app)
 
@@ -27,20 +30,22 @@ MESSAGE_SIZES = [32, 256, 1024, 40968192, 16384, 32768, 65536]  # Byte sizes to 
 
 # Function to connect to the SQLite results database
 def get_db_connection():
+    """ Connect to the SQLite database. """
     conn = sqlite3.connect("pqc_results.db", check_same_thread=False)
     return conn # Returns the SQLite database connection
 
 # Ensure the database and table exist
 def initialize_database():
+    """ Initialize the database and tables for results storage. """
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Create table if it does not exist
+    # Table for benchmarking results
     cursor.execute("""
             CREATE TABLE IF NOT EXISTS pqc_benchmarks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 algorithm TEXT,
-                message_size INTEGER,
+                application TEXT,
                 execution_time REAL,
                 cpu_usage REAL,
                 memory_usage REAL,
@@ -48,8 +53,22 @@ def initialize_database():
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+    # Table for storing encrypted/signed traffic payloads
+    cursor.execute("""
+            CREATE TABLE IF NOT EXISTS encrypted_traffic (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                algorithm TEXT,
+                application TEXT,
+                original_size INTEGER,
+                encrypted_size INTEGER,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
     conn.commit()
     conn.close()
+
 
 ##############
 # BENCHMARKS #
