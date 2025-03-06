@@ -70,227 +70,187 @@ def initialize_database():
     conn.close()
 
 
-##############
-# BENCHMARKS #
-##############
-
-# Function to fetch all benchmark results from the results database
-def get_all_benchmarks():
-    conn = get_db_connection() # Connect to the database
-    df = pd.read_sql_query("SELECT * FROM pqc_benchmarks ORDER BY timestamp DESC, message_size ASC", conn)
-    # Executes an SQL query to retrieve all records from the pqc_benchmarks table
-    # sorted by timestamp in descending order (newest results first)
-    # Returns the results as a pandas DataFrame
-    conn.close() # Closes the database connection
-    return df # Returns the DataFrame containing all benchmark results
-
+###################
+# TRAFFIC CAPTURE #
+###################
 
 # Traffic capture function based on application type
-def capture_traffic(application):
+def capture_traffic(application, duration=10):
+    """ Captures application-specific traffic using tcpdump and stops after a set duration. """
     pcap_file = f"{application.replace(' ', '_').lower()}_traffic.pcap"
+    tcpdump_process = None
+
     try:
         if application == "Video Streaming":
             subprocess.Popen(["ffmpeg", "-i", "input.mp4", "-f", "mpegts", "udp://127.0.0.1:1234"],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.Popen(["tcpdump", "-i", "wlan0", "-w", pcap_file], stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL)
 
         elif application == "File Transfer":
             subprocess.Popen(["iperf3", "-s"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.Popen(["tcpdump", "-i", "wlan0", "-w", pcap_file], stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL)
 
-        elif application == "VoIP":
-            subprocess.Popen(["tcpdump", "-i", "wlan0", "port", "5060", "-w", pcap_file], stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL)
+        tcpdump_process = subprocess.Popen(["tcpdump", "-i", "wlan0", "-w", pcap_file],
+                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        elif application == "Web Browsing":
-            subprocess.Popen(["tcpdump", "-i", "wlan0", "port", "80", "or", "port", "443", "-w", pcap_file],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(duration)  # Capture traffic for `duration` seconds
+        if tcpdump_process:
+            tcpdump_process.terminate()  # Stop tcpdump after capture time
 
         return pcap_file
     except Exception as e:
         return str(e)
 
+######################
+# TRAFFIC EXTRACTION #
+######################
 
-# Benchmarking function for PQC algorithms (Runs PQC Tests)
-def benchmark_pqc(algorithm, application):
+def extract_payloads(pcap_file):
+    """ Extracts payload data from the captured .pcap file. """
     try:
-        process = psutil.Process() # Get current process information
-        results = []
+        cap = pyshark.FileCapture(pcap_file, display_filter="tcp or udp")
+        payloads = []
 
-        pcap_file = capture_traffic(application)  # Capture traffic
+        for packet in cap:
+            if hasattr(packet, "tcp") and hasattr(packet.tcp, "payload"):
+                payloads.append(bytes.fromhex(packet.tcp.payload.replace(":", "")))
+            elif hasattr(packet, "udp") and hasattr(packet.udp, "payload"):
+                payloads.append(bytes.fromhex(packet.udp.payload.replace(":", "")))
 
-        for size in MESSAGE_SIZES:
-            message = bytes(size)  # Generate a message of the given size
-            execution_times = []
-            cpu_usages = []
-            memory_usages = []
-            power_usages = []
-
-            # Warm-up cycle to flush CPU cache effects
-            for _ in range(3):
-                _ = bytes(size)  # Force memory allocation
-
-            def measure_pqc():
-                time.sleep(0.05)  # Small delay to stabilize thread execution
-                start_time = time.perf_counter_ns()  # Higher precision timing
-                start_cpu = psutil.cpu_percent(interval=0.5) or 0.0 # Ensures no blank values
-                start_mem = process.memory_info().rss / (1024 * 1024)  # MB
-
-                # Handle Kyber512 algorithm
-                if algorithm == "Kyber512":
-                    kem = oqs.KeyEncapsulation("Kyber512")
-                    public_key = kem.generate_keypair()
-                    ciphertext, shared_secret_enc = kem.encap_secret(public_key)
-                    shared_secret_dec = kem.decap_secret(ciphertext)
-
-
-                # Handle Dilithium2 algorithm
-                elif algorithm == "Dilithium2":
-                    sig = oqs.Signature("Dilithium2")
-                    try:
-                        public_key = sig.generate_keypair()  # Only public key is returned
-                        print(f"✅ Keypair generated for Dilithium2")
-                    except Exception as e:
-                        print(f"❌ Failed to generate keypair for Dilithium2: {e}")
-                        return {"error": f"Failed to generate keypair for Dilithium2: {str(e)}"}
-                    try:
-                        signature = sig.sign(message)  # No secret key needed
-                        print(f"✅ Signature generated for Dilithium2")
-                    except Exception as e:
-                        print(f"❌ Failed to sign message with Dilithium2: {e}")
-                        return {"error": f"Failed to sign message with Dilithium2: {str(e)}"}
-                    try:
-                        is_valid = sig.verify(message, signature, public_key)
-                        if not is_valid:
-                            print(f"❌ Signature verification failed for Dilithium2")
-                            return {"error": f"Dilithium2 signature verification failed"}
-                        print(f"✅ Signature verified for Dilithium2")
-                    except Exception as e:
-                        print(f"❌ Failed to verify signature with Dilithium2: {e}")
-                        return {"error": f"Failed to verify signature with Dilithium2: {str(e)}"}
-
-
-                # Handle SPHINCS+-128s algorithm
-                elif algorithm in ["SPHINCS+-SHA2-128s-simple", "SPHINCS+-SHAKE-128s-simple"]:
-                    try:
-                        sig = oqs.Signature(algorithm)
-                        print(f"✅ SPHINCS+ ({algorithm}) Signature object created")
-                    except Exception as e:
-                        print(f"❌ Failed to initialize {algorithm}: {e}")
-                        return {"error": f"Failed to initialize {algorithm}: {str(e)}"}
-                    try:
-                        public_key = sig.generate_keypair()  # Only public key is returned
-                        print(f"✅ Keypair generated for {algorithm}")
-                    except Exception as e:
-                        print(f"❌ Failed to generate keypair for {algorithm}: {e}")
-                        return {"error": f"Failed to generate keypair for {algorithm}: {str(e)}"}
-                    try:
-                        signature = sig.sign(message)  # No secret key needed
-                        print(f"✅ Signature generated for {algorithm}")
-                    except Exception as e:
-                        print(f"❌ Failed to sign message with {algorithm}: {e}")
-                        return {"error": f"Failed to sign message with {algorithm}: {str(e)}"}
-                    try:
-                        is_valid = sig.verify(message, signature, public_key)
-                        if not is_valid:
-                            print(f"❌ Signature verification failed for {algorithm}")
-                            return {"error": f"{algorithm} signature verification failed"}
-                        print(f"✅ Signature verified for {algorithm}")
-                    except Exception as e:
-                        print(f"❌ Failed to verify signature with {algorithm}: {e}")
-                        return {"error": f"Failed to verify signature with {algorithm}: {str(e)}"}
-
-                execution_time = (time.perf_counter_ns() - start_time) / 1e9  # Convert ns to seconds
-                cpu_usage_per_core = psutil.cpu_percent(interval=0.1, percpu=True)
-                avg_cpu_usage = sum(cpu_usage_per_core) / max(len(cpu_usage_per_core), 1)  # Prevent division by zero
-                end_mem = process.memory_info().rss / (1024 * 1024)
-                power_usage = get_power_usage()
-                system_load = psutil.getloadavg()[0]  # Measure system load
-
-                execution_times.append(execution_time)
-                cpu_usages.append(avg_cpu_usage)
-                memory_usages.append(end_mem)
-                power_usages.append(power_usage)
-
-            threads = []
-            for _ in range(NUM_TRIALS):  # Run multiple trials
-                thread = threading.Thread(target=measure_pqc)
-                thread.start()
-                threads.append(thread)
-
-            for thread in threads:
-                thread.join()
-
-            # Compute averages across multiple trials for consistency
-            avg_execution_time = sum(execution_times) / NUM_TRIALS
-            avg_cpu_usage = sum(cpu_usages) /  max(len(cpu_usages), 1)  # Prevent division by zero
-            avg_memory_usage = sum(memory_usages) / NUM_TRIALS
-            avg_power_usage = sum([x for x in power_usages if isinstance(x, (int, float))]) / max(
-                len([x for x in power_usages if isinstance(x, (int, float))]), 1) if any(
-                isinstance(x, (int, float)) for x in power_usages) else "Not Available"
-
-            results.append((size, avg_execution_time, avg_cpu_usage, avg_memory_usage, avg_power_usage, application))
-        return {
-            "algorithm": algorithm,
-            "application": application,
-            "pcap_file": pcap_file,
-            "results": results  # Store different message size results
-        }
+        cap.close()
+        return payloads
     except Exception as e:
         return {"error": str(e)}
+
+##########################
+# PQC ENCRYPTION/SIGNING #
+##########################
+
+def apply_pqc_algorithm(algorithm, payloads):
+    """ Encrypts or signs payloads using the selected PQC algorithm. """
+    try:
+        encrypted_payloads = []
+
+        if algorithm == "Kyber512":
+            kem = oqs.KeyEncapsulation("Kyber512")
+            public_key = kem.generate_keypair()
+
+            for payload in payloads:
+                ciphertext, shared_secret_enc = kem.encap_secret(public_key)
+                encrypted_payloads.append((len(payload), len(ciphertext)))
+
+        elif algorithm == "Dilithium2":
+            sig = oqs.Signature("Dilithium2")
+            public_key = sig.generate_keypair()
+
+            for payload in payloads:
+                signature = sig.sign(payload)
+                is_valid = sig.verify(payload, signature, public_key)
+                if not is_valid:
+                    raise ValueError("Signature verification failed")
+                encrypted_payloads.append((len(payload), len(signature)))
+
+        elif algorithm in ["SPHINCS+-SHA2-128s-simple", "SPHINCS+-SHAKE-128s-simple"]:
+            sig = oqs.Signature(algorithm)
+            public_key = sig.generate_keypair()
+
+            for payload in payloads:
+                signature = sig.sign(payload)
+                is_valid = sig.verify(payload, signature, public_key)
+                if not is_valid:
+                    raise ValueError("Signature verification failed")
+                encrypted_payloads.append((len(payload), len(signature)))
+
+        return encrypted_payloads
+    except Exception as e:
+        return {"error": str(e)}
+
+###########################
+# PERFORMANCE MEASUREMENT #
+###########################
+
+def measure_performance(algorithm, payloads):
+    """ Measures execution time, CPU, memory, and power usage of PQC encryption/signing. """
+    process = psutil.Process()
+    execution_times, cpu_usages, memory_usages, power_usages = [], [], [], []
+
+    for payload in payloads:
+        start_time = time.perf_counter_ns()
+        start_cpu = psutil.cpu_percent(interval=0.1)
+        start_mem = process.memory_info().rss / (1024 * 1024)
+
+        encrypted_payloads = apply_pqc_algorithm(algorithm, [payload])
+
+        execution_time = (time.perf_counter_ns() - start_time) / 1e6  # Convert ns to ms
+        end_mem = process.memory_info().rss / (1024 * 1024)
+        cpu_usage = psutil.cpu_percent(interval=0.1)
+        power_usage = "Not Available"  # Future implementation for power measurement
+
+        execution_times.append(execution_time)
+        cpu_usages.append(cpu_usage)
+        memory_usages.append(end_mem - start_mem)
+        power_usages.append(power_usage)
+
+    return {
+        "avg_execution_time_ms": round(sum(execution_times) / len(execution_times), 2),
+        "avg_cpu_usage": round(sum(cpu_usages) / len(cpu_usages), 2),
+        "avg_memory_usage_mb": round(sum(memory_usages) / len(memory_usages), 2),
+        "avg_power_usage_watts": round(sum([x for x in power_usages if isinstance(x, (int, float))], 2))
+        if power_usages else "Not Available"
+    }
+
+################
+# BENCHMARKING #
+################
+
+def benchmark_pqc(algorithm, application):
+    """ Runs the full benchmark process. """
+    pcap_file = capture_traffic(application)
+    payloads = extract_payloads(pcap_file)
+
+    # Encrypt and store payload size differences
+    encrypted_payloads = apply_pqc_algorithm(algorithm, payloads)
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Store encrypted payload sizes
+    for original_size, encrypted_size in encrypted_payloads:
+        cursor.execute("""
+            INSERT INTO encrypted_traffic (algorithm, application, original_size, encrypted_size)
+            VALUES (?, ?, ?, ?)
+        """, (algorithm, application, original_size, encrypted_size))
+
+    # Measure PQC algorithm performance
+    performance_metrics = measure_performance(algorithm, payloads)
+
+    cursor.execute("""
+        INSERT INTO pqc_benchmarks (algorithm, application, execution_time, cpu_usage, memory_usage, power_usage)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (algorithm, application, performance_metrics["avg_execution_time_ms"],
+          performance_metrics["avg_cpu_usage"], performance_metrics["avg_memory_usage_mb"],
+          performance_metrics["avg_power_usage_watts"]))
+
+    conn.commit()
+    conn.close()
+
+    return {"status": "completed", "pcap_file": pcap_file, "performance_metrics": performance_metrics}
 
 
 # Read power stats from the Raspberry Pi
 def get_power_usage():
     try:
-        power_file = "/sys/class/power_supply/battery/voltage_now"
-        if os.path.exists(power_file):
-            with open(power_file, "r") as f:
-                voltage = int(f.read().strip()) / 1e6  # Convert µV to V
-
-            current_file = "/sys/class/power_supply/battery/current_now"
-            if os.path.exists(current_file):
-                with open(current_file, "r") as f:
-                    current = int(f.read().strip()) / 1e6  # Convert µA to A
-
-                power_usage = round(voltage * current, 2)  # Compute Power (W)
-                return power_usage
-        return "Not Available"
+        voltage = subprocess.run(["vcgencmd", "measure_volts"], capture_output=True, text=True).stdout
+        voltage = float(voltage.split('=')[1].replace('V', '')) if voltage else None
+        return voltage if voltage else "Not Available"
     except Exception:
         return "Error"
 
-
-
-# Async Function to Run Benchmarks and Update Progress
-def run_benchmarks(algorithms, application):
+# Function to fetch benchmark results
+def get_all_benchmarks():
+    """Fetch all stored benchmark results from the database."""
     conn = get_db_connection()
-
-    for algorithm in algorithms:
-        socketio.emit("progress", {"message": f"Running {algorithm}..."})
-        result = benchmark_pqc(algorithm, application)
-
-        if "error" not in result:
-            print(f"✅ Inserting {algorithm} results into the database")
-
-            for message_size, execution_time, cpu_usage, memory_usage, power_usage in result["results"]:
-                conn.execute("""
-                            INSERT INTO pqc_benchmarks (algorithm, message_size, execution_time, cpu_usage, memory_usage, power_usage)
-                            VALUES (?, ?, ?, ?, ?, ?)
-                        """, (algorithm, message_size, execution_time, cpu_usage, memory_usage, power_usage))
-                conn.commit()
-        else:
-            print(f"❌ Error running {algorithm}: {result['error']}")
-            socketio.emit("progress", {"message": f"Error: {result['error']}"})  # Display in UI
-
+    df = pd.read_sql_query("SELECT * FROM pqc_benchmarks ORDER BY timestamp DESC", conn)
     conn.close()
-
-    with app.app_context():
-        socketio.emit("progress", {"message": "Completed!"})
-        socketio.emit("redirect", {"url": "/report"})  # Redirect to report page
-
-
+    return df
 
 ##########
 # ROUTES #
@@ -313,7 +273,7 @@ def benchmark():
     if not algorithm or not application:
         return jsonify({"error": "Algorithm or application not selected"}), 400
 
-    thread = threading.Thread(target=run_benchmarks, args=([algorithm], application))
+    thread = threading.Thread(target=benchmark_pqc, args=(algorithm, application))
     thread.start()
 
     return jsonify({"status": "started"}) 
