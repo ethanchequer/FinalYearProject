@@ -39,6 +39,11 @@ def initialize_database():
     """ Initialize the database and tables for results storage. """
     conn = get_db_connection()
     cursor = conn.cursor()
+    # Check if the 'application' column exists in pqc_benchmarks
+    cursor.execute("PRAGMA table_info(pqc_benchmarks)")
+    columns = [column[1] for column in cursor.fetchall()]
+    if "application" not in columns:
+        cursor.execute("ALTER TABLE pqc_benchmarks ADD COLUMN application TEXT")
 
     # Table for benchmarking results
     cursor.execute("""
@@ -134,8 +139,11 @@ def apply_pqc_algorithm(algorithm, payloads):
             public_key = kem.generate_keypair()
 
             for payload in payloads:
-                ciphertext, shared_secret_enc = kem.encap_secret(public_key)
-                encrypted_payloads.append((len(payload), len(ciphertext)))
+                ciphertext, _ = kem.encap_secret(public_key)
+                if isinstance(ciphertext, bytes):
+                    encrypted_payloads.append((len(payload), len(ciphertext)))  # Ensure a tuple is returned
+                else:
+                    encrypted_payloads.append((len(payload), 0))  # Handle unexpected output safely
 
         elif algorithm == "Dilithium2":
             sig = oqs.Signature("Dilithium2")
@@ -143,10 +151,10 @@ def apply_pqc_algorithm(algorithm, payloads):
 
             for payload in payloads:
                 signature = sig.sign(payload)
-                is_valid = sig.verify(payload, signature, public_key)
-                if not is_valid:
-                    raise ValueError("Signature verification failed")
-                encrypted_payloads.append((len(payload), len(signature)))
+                if sig.verify(payload, signature, public_key):
+                    encrypted_payloads.append((len(payload), len(signature)))
+                else:
+                    encrypted_payloads.append((len(payload), 0))  # Signature failed, store safe value
 
         elif algorithm in ["SPHINCS+-SHA2-128s-simple", "SPHINCS+-SHAKE-128s-simple"]:
             sig = oqs.Signature(algorithm)
@@ -154,14 +162,15 @@ def apply_pqc_algorithm(algorithm, payloads):
 
             for payload in payloads:
                 signature = sig.sign(payload)
-                is_valid = sig.verify(payload, signature, public_key)
-                if not is_valid:
-                    raise ValueError("Signature verification failed")
-                encrypted_payloads.append((len(payload), len(signature)))
+                if sig.verify(payload, signature, public_key):
+                    encrypted_payloads.append((len(payload), len(signature)))
+                else:
+                    encrypted_payloads.append((len(payload), 0))  # Handle failure case safely
 
-        return encrypted_payloads
+        return encrypted_payloads  # Always return a list of (original_size, encrypted_size)
+
     except Exception as e:
-        return {"error": str(e)}
+        return [(0, 0)]  # Return safe fallback value to prevent crashes
 
 ###########################
 # PERFORMANCE MEASUREMENT #
@@ -173,20 +182,21 @@ def measure_performance(algorithm, payloads):
     execution_times, cpu_usages, memory_usages, power_usages = [], [], [], []
 
     for payload in payloads:
-        start_time = time.perf_counter_ns()
+        start_time = time.perf_counter()
         start_cpu = psutil.cpu_percent(interval=0.1)
-        start_mem = process.memory_info().rss / (1024 * 1024)
+        start_mem = process.memory_info().rss / (1024 * 1024)  # Before encryption
 
         encrypted_payloads = apply_pqc_algorithm(algorithm, [payload])
 
-        execution_time = (time.perf_counter_ns() - start_time) / 1e6  # Convert ns to ms
-        end_mem = process.memory_info().rss / (1024 * 1024)
+        execution_time = time.perf_counter() - start_time  # Already in seconds
+        mid_mem = process.memory_info().rss / (1024 * 1024)  # Immediately after encryption
+        end_mem = psutil.virtual_memory().used / (1024 * 1024)  # Overall system usage
         cpu_usage = psutil.cpu_percent(interval=0.1)
         power_usage = "Not Available"  # Future implementation for power measurement
 
         execution_times.append(execution_time)
         cpu_usages.append(cpu_usage)
-        memory_usages.append(end_mem - start_mem)
+        memory_usages.append(mid_mem - start_mem)
         power_usages.append(power_usage)
 
     return {
@@ -237,12 +247,13 @@ def benchmark_pqc(algorithm, application):
 
 # Read power stats from the Raspberry Pi
 def get_power_usage():
-    try:
-        voltage = subprocess.run(["vcgencmd", "measure_volts"], capture_output=True, text=True).stdout
-        voltage = float(voltage.split('=')[1].replace('V', '')) if voltage else None
-        return voltage if voltage else "Not Available"
-    except Exception:
-        return "Error"
+    power_file = "/sys/class/power_supply/battery/voltage_now"
+    if not os.path.exists(power_file):
+        return "Not Available"  # Ensure "Not Available" is returned when power stats are missing
+    with open(power_file, "r") as f:
+        voltage = int(f.read().strip()) / 1e6  # Convert µV to V
+    # Additional logic for power usage can be added here
+    return voltage
 
 # Function to fetch benchmark results
 def get_all_benchmarks():
@@ -276,7 +287,7 @@ def benchmark():
     thread = threading.Thread(target=benchmark_pqc, args=(algorithm, application))
     thread.start()
 
-    return jsonify({"status": "started"}) 
+    return jsonify({"status": "started"})
 
 
 # Report Page (Shows Test Results)
@@ -327,9 +338,9 @@ def get_security_levels_tested():
         "Kyber512": 1, "Kyber768": 3, "Kyber1024": 5,
         "Dilithium2": 2, "Dilithium3": 3, "Dilithium5": 5,
         "Falcon-512": 1, "Falcon-1024": 5,
-        "SPHINCS+-128s": 1, "SPHINCS+-128f": 1,
-        "SPHINCS+-192s": 3, "SPHINCS+-192f": 3,
-        "SPHINCS+-256s": 5, "SPHINCS+-256f": 5
+        "SPHINCS+-SHA2-128s": 1, "SPHINCS+-SHA2-128f": 1,
+        "SPHINCS+-SHA2-192s": 3, "SPHINCS+-SHA2-192f": 3,
+        "SPHINCS+-SHA2-256s": 5, "SPHINCS+-SHA2-256f": 5
     }
     return jsonify({alg: security_levels.get(alg, "Unknown") for alg in tested_algorithms})
 

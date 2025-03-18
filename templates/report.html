@@ -79,8 +79,7 @@
                 <tr>
                     <th>ID</th>
                     <th>Algorithm</th>
-                    <th>Message Size (Bytes)</th>
-                    <th>Execution Time (µs)</th>
+                    <th>Execution Time (s)</th> <!-- Modified to seconds -->
                     <th>CPU Usage (%)</th>
                     <th>Memory Usage (MB)</th>
                     <th>Power Usage</th>
@@ -92,8 +91,7 @@
                 <tr>
                     <td>{{ row["id"] }}</td>
                     <td>{{ row["algorithm"] }}</td>
-                    <td>{{ row["message_size"] }}</td>
-                    <td>{{ "%.3f" | format(row["execution_time"] * 1000) }}</td>  <!-- Convert s to ms -->
+                    <td>{{ "%.3f" | format(row["execution_time"]) }}</td>  <!-- Changed to seconds -->
                     <td>{{ row['cpu_usage'] }}</td>
                     <td>{{ row['memory_usage'] }}</td>
                     <td>{{ row["power_usage"] }}</td>
@@ -105,89 +103,5 @@
     </div>
     <a href="/" class="back-button">Run Another Test</a>
 </div>
-<h2>Average Algorithm Execution Time</h2>
-<canvas id="executionChart"></canvas>
-<script>
-    document.addEventListener("DOMContentLoaded", function() {
-        fetch('/execution_times')
-    .then(response => response.json())
-    .then(data => {
-        console.log("Execution Time Data:", data);  // Debugging
-        let labels = data.map(item => item.algorithm);
-        let executionTimes = data.map(item => item.execution_time);
-
-        const ctx = document.getElementById('executionChart').getContext('2d');
-        new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: 'Execution Time (s)',  // Changed from µs to s
-                    data: executionTimes,
-                    backgroundColor: ['#4CAF50', '#2196F3', '#FFC107'],
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                scales: {
-                    y: {
-                        beginAtZero: true
-                    }
-                }
-            }
-        });
-    })
-    .catch(error => console.error('Error fetching execution times:', error));
-    });
-</script>
-<h2>Execution Time vs CPU Usage</h2>
-<canvas id="scatterChart"></canvas>
-<script>
-    document.addEventListener("DOMContentLoaded", function() {
-        fetch('/execution_vs_cpu')
-            .then(response => response.json())
-            .then(data => {
-                let datasets = {};
-                data.forEach(item => {
-                    if (!datasets[item.algorithm]) {
-                        datasets[item.algorithm] = { label: item.algorithm, data: [], backgroundColor: '' };
-                    }
-                    datasets[item.algorithm].data.push({ x: item.cpu_usage, y: item.execution_time });
-                });
-                const ctx = document.getElementById('scatterChart').getContext('2d');
-                new Chart(ctx, {
-                    type: 'scatter',
-                    data: {
-                        datasets: Object.values(datasets).map((dataset, i) => ({
-                            label: dataset.label,
-                            data: dataset.data,
-                            backgroundColor: ['#4CAF50', '#2196F3', '#FFC107', '#FF5722', '#9C27B0'][i % 5]
-                        }))
-                    },
-                    options: {
-                        responsive: true,
-                        scales: {
-                            x: {
-                                type: 'linear',
-                                position: 'bottom',
-                                title: {
-                                    display: true,
-                                    text: 'Execution Time (µs)'
-                                }
-                            },
-                            y: {
-                                title: {
-                                    display: true,
-                                    text: 'CPU Usage (%)'
-                                }
-                            }
-                        }
-                    }
-                });
-            })
-            .catch(error => console.error('Error fetching execution vs CPU data:', error));
-    });
-</script>
 </body>
 </html>
