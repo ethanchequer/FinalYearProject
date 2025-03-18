@@ -298,6 +298,8 @@ def generate_report():
     # Renders report.html with the fetched benchmark results as tables and column titles
     # tables=[df.to_html()]: Converts the DataFrame to an HTML table
     # titles=df.columns.values: Passes column names for formatting
+    grouped = df.groupby('algorithm')
+    return render_template("report.html", grouped_data=grouped)
 
 
 # Function to send execution time data as JSON for execution time bar chart

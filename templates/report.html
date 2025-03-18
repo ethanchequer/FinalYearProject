@@ -32,6 +32,7 @@
             max-height: 400px;
             overflow-y: auto;
             border: 1px solid #ddd;
+            margin-bottom: 20px;
         }
         table {
             width: 100%;
@@ -70,16 +71,18 @@
 <body>
 <header>
     <h1>PQC Benchmark Report</h1>
-    <h2>Performance Results</h2>
+    <h2>Performance Results by Algorithm</h2>
 </header>
 <div class="content">
+    {% set algorithms = data | groupby("algorithm") %}
+    {% for algorithm, results in algorithms %}
     <div class="table-container">
+        <h3>{{ algorithm }}</h3>
         <table>
             <thead>
                 <tr>
-                    <th>ID</th>
-                    <th>Algorithm</th>
-                    <th>Execution Time (s)</th> <!-- Modified to seconds -->
+                    <th>Application</th>
+                    <th>Execution Time (s)</th>
                     <th>CPU Usage (%)</th>
                     <th>Memory Usage (MB)</th>
                     <th>Power Usage</th>
@@ -87,11 +90,10 @@
                 </tr>
             </thead>
             <tbody>
-                {% for row in data %}
+                {% for row in results %}
                 <tr>
-                    <td>{{ row["id"] }}</td>
-                    <td>{{ row["algorithm"] }}</td>
-                    <td>{{ "%.3f" | format(row["execution_time"]) }}</td>  <!-- Changed to seconds -->
+                    <td>{{ row["application"] }}</td>
+                    <td>{{ "%.3f" | format(row["execution_time"]) }}</td>
                     <td>{{ row['cpu_usage'] }}</td>
                     <td>{{ row['memory_usage'] }}</td>
                     <td>{{ row["power_usage"] }}</td>
@@ -101,6 +103,7 @@
             </tbody>
         </table>
     </div>
+    {% endfor %}
     <a href="/" class="back-button">Run Another Test</a>
 </div>
 </body>
