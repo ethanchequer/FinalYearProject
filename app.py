@@ -1,6 +1,6 @@
 # app.py handles benchmarking and web routes
-# imports Flask and sets up the app
-from flask import Flask, request, jsonify, render_template, redirect, url_for
+# This version of the app runs the execution time, CPU, memory and power usage for the PQC benchmarks.
+from flask import Flask, request, jsonify, render_template, redirect, url_for # imports Flask and sets up the app
 from flask_socketio import SocketIO, emit
 import time
 import oqs # Python bindings for the OQS library
@@ -11,15 +11,13 @@ import pandas as pd
 import psutil
 import threading
 import gc
+import tracemalloc
 
 app = Flask(__name__)
 socketio = SocketIO(app)
 
-# Define the number of trials per test to improve accuracy
-NUM_TRIALS = 10
-
-# Available application types for testing
-APPLICATION_TYPES = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"]
+NUM_TRIALS = 10 # Define the number of trials per test to improve accuracy
+APPLICATION_TYPES = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"] # Available application types for testing
 
 ############
 # DATABASE #
@@ -282,7 +280,3 @@ if __name__ == '__main__': # If this script is run directly, start the Flask app
     app.run(host="192.168.68.155", port=5000, debug=True, threaded=True) # Enable debug mode for:
                         # Automatic reloading on code changes.
                         # Error traceback in the browser when exceptions occur
-
-# This version of the app runs the execution time, CPU, memory and power usage for the PQC benchmarks.
-# Execution time is the only calculation concern...
-# Next step is to include application traffic
