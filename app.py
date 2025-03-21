@@ -130,20 +130,19 @@ def benchmark_pqc(algorithm, application):
         }.get(application, b"Generic data")
 
         # Start performance tracking
-        start_time = time.perf_counter()
+        start_time = time.perf_counter_ns()
         start_cpu = process.cpu_percent(interval=None)
-        start_mem = process.memory_info().rss / (1024 * 1024)
-
+        start_mem = psutil.virtual_memory().used / (1024 * 1024) # Total system memory used
         encrypted_data = apply_pqc_algorithm(algorithm, data_chunk, public_key)
 
         # End performance tracking
-        execution_time = time.perf_counter() - start_time
+        execution_time = (time.perf_counter_ns() - start_time) / 1_000_000 # Convert to milliseconds
         end_cpu = process.cpu_percent(interval=None)
-        end_mem = process.memory_info().rss / (1024 * 1024)
+        end_mem = psutil.virtual_memory().used / (1024 * 1024) # Updated system memory used
 
         execution_times.append(execution_time)
         cpu_usages.append(abs(end_cpu - start_cpu))
-        memory_usages.append(abs(end_mem - start_mem))
+        memory_usages.append(abs(end_mem - start_mem)) # Compute actual memory difference
 
         # Store encrypted data size
         if encrypted_data is not None:
@@ -165,7 +164,7 @@ def benchmark_pqc(algorithm, application):
         VALUES (?, ?, ?, ?, ?, ?)
     """, (
         algorithm, application,
-        round(sum(execution_times) / len(execution_times), 2),
+        round(sum(execution_times) / len(execution_times), 6),  # Store with microsecond precision
         round(sum(cpu_usages) / len(cpu_usages), 2),
         round(sum(memory_usages) / len(memory_usages), 2),
         "Not Available"
