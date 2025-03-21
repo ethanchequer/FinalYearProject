@@ -6,7 +6,6 @@ import time
 import oqs # Python bindings for the OQS library
 import os
 import subprocess
-import pyshark
 import sqlite3 # SQLite database
 import pandas as pd
 import psutil
@@ -20,9 +19,6 @@ NUM_TRIALS = 10
 
 # Available application types for testing
 APPLICATION_TYPES = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"]
-
-# Different message sizes to run multiple tests
-MESSAGE_SIZES = [32, 256, 1024, 40968192, 16384, 32768, 65536]  # Byte sizes to test (32B, 256B, 1KB, 4KB)
 
 ############
 # DATABASE #
@@ -75,193 +71,114 @@ def initialize_database():
     conn.close()
 
 
-###################
-# TRAFFIC CAPTURE #
-###################
-
-# Traffic capture function based on application type
-def capture_traffic(application, duration=10):
-    """ Captures application-specific traffic using tcpdump and stops after a set duration. """
-    pcap_file = f"{application.replace(' ', '_').lower()}_traffic.pcap"
-    tcpdump_process = None
-
-    try:
-        if application == "Video Streaming":
-            subprocess.Popen(["ffmpeg", "-i", "input.mp4", "-f", "mpegts", "udp://127.0.0.1:1234"],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-        elif application == "File Transfer":
-            subprocess.Popen(["iperf3", "-s"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-        tcpdump_process = subprocess.Popen(["tcpdump", "-i", "wlan0", "-w", pcap_file],
-                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-        time.sleep(duration)  # Capture traffic for `duration` seconds
-        if tcpdump_process:
-            tcpdump_process.terminate()  # Stop tcpdump after capture time
-
-        return pcap_file
-    except Exception as e:
-        return str(e)
-
-######################
-# TRAFFIC EXTRACTION #
-######################
-
-def extract_payloads(pcap_file):
-    """ Extracts payload data from the captured .pcap file. """
-    try:
-        cap = pyshark.FileCapture(pcap_file, display_filter="tcp or udp")
-        payloads = []
-
-        for packet in cap:
-            if hasattr(packet, "tcp") and hasattr(packet.tcp, "payload"):
-                payloads.append(bytes.fromhex(packet.tcp.payload.replace(":", "")))
-            elif hasattr(packet, "udp") and hasattr(packet.udp, "payload"):
-                payloads.append(bytes.fromhex(packet.udp.payload.replace(":", "")))
-
-        cap.close()
-        return payloads
-    except Exception as e:
-        return {"error": str(e)}
-
 ##########################
 # PQC ENCRYPTION/SIGNING #
 ##########################
 
-def apply_pqc_algorithm(algorithm, payloads):
-    """ Encrypts or signs payloads using the selected PQC algorithm. """
+def apply_pqc_algorithm(algorithm, payload, public_key):
+    """ Encrypts or signs a single payload using the selected PQC algorithm in real-time. """
     try:
-        encrypted_payloads = []
-
         if algorithm == "Kyber512":
             kem = oqs.KeyEncapsulation("Kyber512")
-            public_key = kem.generate_keypair()
-
-            for payload in payloads:
-                ciphertext, _ = kem.encap_secret(public_key)
-                if isinstance(ciphertext, bytes):
-                    encrypted_payloads.append((len(payload), len(ciphertext)))  # Ensure a tuple is returned
-                else:
-                    encrypted_payloads.append((len(payload), 0))  # Handle unexpected output safely
+            ciphertext, _ = kem.encap_secret(public_key)
+            return ciphertext
 
         elif algorithm == "Dilithium2":
             sig = oqs.Signature("Dilithium2")
-            public_key = sig.generate_keypair()
-
-            for payload in payloads:
-                signature = sig.sign(payload)
-                if sig.verify(payload, signature, public_key):
-                    encrypted_payloads.append((len(payload), len(signature)))
-                else:
-                    encrypted_payloads.append((len(payload), 0))  # Signature failed, store safe value
+            signature = sig.sign(payload)
+            if sig.verify(payload, signature, public_key):
+                return signature
 
         elif algorithm in ["SPHINCS+-SHA2-128s-simple", "SPHINCS+-SHAKE-128s-simple"]:
             sig = oqs.Signature(algorithm)
-            public_key = sig.generate_keypair()
+            signature = sig.sign(payload)
+            if sig.verify(payload, signature, public_key):
+                return signature
 
-            for payload in payloads:
-                signature = sig.sign(payload)
-                if sig.verify(payload, signature, public_key):
-                    encrypted_payloads.append((len(payload), len(signature)))
-                else:
-                    encrypted_payloads.append((len(payload), 0))  # Handle failure case safely
-
-        return encrypted_payloads  # Always return a list of (original_size, encrypted_size)
+        return None
 
     except Exception as e:
-        return [(0, 0)]  # Return safe fallback value to prevent crashes
+        return None
 
-###########################
-# PERFORMANCE MEASUREMENT #
-###########################
-
-def measure_performance(algorithm, payloads):
-    """ Measures execution time, CPU, memory, and power usage of PQC encryption/signing. """
-    process = psutil.Process()
-    execution_times, cpu_usages, memory_usages, power_usages = [], [], [], []
-
-    for payload in payloads:
-        start_time = time.perf_counter()
-        start_cpu = psutil.cpu_percent(interval=0.1)
-        start_mem = process.memory_info().rss / (1024 * 1024)  # Before encryption
-
-        encrypted_payloads = apply_pqc_algorithm(algorithm, [payload])
-
-        execution_time = time.perf_counter() - start_time  # Already in seconds
-        mid_mem = process.memory_info().rss / (1024 * 1024)  # Immediately after encryption
-        end_mem = psutil.virtual_memory().used / (1024 * 1024)  # Overall system usage
-        cpu_usage = psutil.cpu_percent(interval=0.1)
-        power_usage = "Not Available"  # Future implementation for power measurement
-
-        execution_times.append(execution_time)
-        cpu_usages.append(cpu_usage)
-        memory_usages.append(mid_mem - start_mem)
-        power_usages.append(power_usage)
-
-    return {
-        "avg_execution_time_ms": round(sum(execution_times) / len(execution_times), 2),
-        "avg_cpu_usage": round(sum(cpu_usages) / len(cpu_usages), 2),
-        "avg_memory_usage_mb": round(sum(memory_usages) / len(memory_usages), 2),
-        "avg_power_usage_watts": round(sum([x for x in power_usages if isinstance(x, (int, float))], 2))
-        if power_usages else "Not Available"
-    }
 
 ################
 # BENCHMARKING #
 ################
 
 def benchmark_pqc(algorithm, application):
-    """ Runs the full benchmark process. """
-    pcap_file = capture_traffic(application)
-    payloads = extract_payloads(pcap_file)
+    """ Runs the full benchmark process with real-time traffic encryption. """
+    process = psutil.Process()
+    execution_times, cpu_usages, memory_usages = [], [], []
 
-    # Encrypt and store payload size differences
-    encrypted_payloads = apply_pqc_algorithm(algorithm, payloads)
+    # Generate keys once at the start
+    if algorithm == "Kyber512":
+        kem = oqs.KeyEncapsulation("Kyber512")
+        public_key = kem.generate_keypair()
+    elif algorithm in ["Dilithium2", "SPHINCS+-SHA2-128s-simple", "SPHINCS+-SHAKE-128s-simple"]:
+        sig = oqs.Signature(algorithm)
+        public_key = sig.generate_keypair()
+    else:
+        public_key = None
+
+    for _ in range(NUM_TRIALS):
+        # Simulate application data
+        data_chunk = {
+            "File Transfer": b"File data chunk",
+            "Video Streaming": b"Video frame data",
+            "VoIP": b"Voice packet data",
+            "Web Browsing": b"HTTP request data"
+        }.get(application, b"Generic data")
+
+        # Start performance tracking
+        start_time = time.perf_counter()
+        start_cpu = process.cpu_percent(interval=None)
+        start_mem = process.memory_info().rss / (1024 * 1024)
+
+        encrypted_data = apply_pqc_algorithm(algorithm, data_chunk, public_key)
+
+        # End performance tracking
+        execution_time = time.perf_counter() - start_time
+        end_cpu = process.cpu_percent(interval=None)
+        end_mem = process.memory_info().rss / (1024 * 1024)
+
+        execution_times.append(execution_time)
+        cpu_usages.append(abs(end_cpu - start_cpu))
+        memory_usages.append(abs(end_mem - start_mem))
+
+        # Store encrypted data size
+        if encrypted_data is not None:
+            original_size = len(data_chunk)
+            encrypted_size = len(encrypted_data)
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO encrypted_traffic (algorithm, application, original_size, encrypted_size)
+                VALUES (?, ?, ?, ?)
+            """, (algorithm, application, original_size, encrypted_size))
+            conn.commit()
+            conn.close()
 
     conn = get_db_connection()
     cursor = conn.cursor()
-
-    # Store encrypted payload sizes
-    for original_size, encrypted_size in encrypted_payloads:
-        cursor.execute("""
-            INSERT INTO encrypted_traffic (algorithm, application, original_size, encrypted_size)
-            VALUES (?, ?, ?, ?)
-        """, (algorithm, application, original_size, encrypted_size))
-
-    # Measure PQC algorithm performance
-    performance_metrics = measure_performance(algorithm, payloads)
-
     cursor.execute("""
         INSERT INTO pqc_benchmarks (algorithm, application, execution_time, cpu_usage, memory_usage, power_usage)
         VALUES (?, ?, ?, ?, ?, ?)
-    """, (algorithm, application, performance_metrics["avg_execution_time_ms"],
-          performance_metrics["avg_cpu_usage"], performance_metrics["avg_memory_usage_mb"],
-          performance_metrics["avg_power_usage_watts"]))
-
+    """, (
+        algorithm, application,
+        round(sum(execution_times) / len(execution_times), 2),
+        round(sum(cpu_usages) / len(cpu_usages), 2),
+        round(sum(memory_usages) / len(memory_usages), 2),
+        "Not Available"
+    ))
     conn.commit()
     conn.close()
 
-    return {"status": "completed", "pcap_file": pcap_file, "performance_metrics": performance_metrics}
+    return {
+        "avg_execution_time_ms": round(sum(execution_times) / len(execution_times), 2),
+        "avg_cpu_usage": round(sum(cpu_usages) / len(cpu_usages), 2),
+        "avg_memory_usage_mb": round(sum(memory_usages) / len(memory_usages), 2),
+    }
 
-
-# Read power stats from the Raspberry Pi
-def get_power_usage():
-    power_file = "/sys/class/power_supply/battery/voltage_now"
-    if not os.path.exists(power_file):
-        return "Not Available"  # Ensure "Not Available" is returned when power stats are missing
-    with open(power_file, "r") as f:
-        voltage = int(f.read().strip()) / 1e6  # Convert µV to V
-    # Additional logic for power usage can be added here
-    return voltage
-
-# Function to fetch benchmark results
-def get_all_benchmarks():
-    """Fetch all stored benchmark results from the database."""
-    conn = get_db_connection()
-    df = pd.read_sql_query("SELECT * FROM pqc_benchmarks ORDER BY timestamp DESC", conn)
-    conn.close()
-    return df
 
 ##########
 # ROUTES #
@@ -293,13 +210,10 @@ def benchmark():
 # Report Page (Shows Test Results)
 @app.route('/report') # Defines the /report page route
 def generate_report():
-    df = get_all_benchmarks() # Calls get_all_benchmarks() to fetch benchmark results from the database
+    conn = get_db_connection()
+    df = pd.read_sql_query("SELECT * FROM pqc_benchmarks ORDER BY timestamp DESC", conn)
+    conn.close()
     return render_template("report.html", data=df.to_dict(orient="records"), titles=df.columns.values)
-    # Renders report.html with the fetched benchmark results as tables and column titles
-    # tables=[df.to_html()]: Converts the DataFrame to an HTML table
-    # titles=df.columns.values: Passes column names for formatting
-    grouped = df.groupby('algorithm')
-    return render_template("report.html", grouped_data=grouped)
 
 
 # Function to send execution time data as JSON for execution time bar chart
@@ -311,8 +225,6 @@ def get_execution_times():
 
     # Keep execution time in seconds (remove microsecond conversion)
     avg_exec_time = df.groupby("algorithm")["execution_time"].mean().reset_index()
-
-    print("Execution Times API Response:", avg_exec_time.to_dict(orient="records"))  # Debugging
 
     return jsonify(avg_exec_time.to_dict(orient="records"))
 
