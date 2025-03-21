@@ -10,6 +10,7 @@ import sqlite3 # SQLite database
 import pandas as pd
 import psutil
 import threading
+import gc
 
 app = Flask(__name__)
 socketio = SocketIO(app)
@@ -132,13 +133,16 @@ def benchmark_pqc(algorithm, application):
         # Start performance tracking
         start_time = time.perf_counter_ns()
         start_cpu = process.cpu_percent(interval=None)
-        start_mem = psutil.virtual_memory().used / (1024 * 1024) # Total system memory used
+        start_mem = process.memory_info().rss / (1024 * 1024) # Before encryption in KB
         encrypted_data = apply_pqc_algorithm(algorithm, data_chunk, public_key)
+
+        gc.collect() # Force garbage collection to prevent premature memory release
 
         # End performance tracking
         execution_time = (time.perf_counter_ns() - start_time) / 1_000_000 # Convert to milliseconds
         end_cpu = process.cpu_percent(interval=None)
-        end_mem = psutil.virtual_memory().used / (1024 * 1024) # Updated system memory used
+        end_mem = process.memory_info().rss / (1024 * 1024)  # Initialize with Resident Set Size (KB)
+        end_mem = max(end_mem, process.memory_info().vms / (1024 * 1024))  # Use vms if higher
 
         execution_times.append(execution_time)
         cpu_usages.append(abs(end_cpu - start_cpu))
@@ -166,7 +170,7 @@ def benchmark_pqc(algorithm, application):
         algorithm, application,
         round(sum(execution_times) / len(execution_times), 6),  # Store with microsecond precision
         round(sum(cpu_usages) / len(cpu_usages), 2),
-        round(sum(memory_usages) / len(memory_usages), 2),
+        round(sum(memory_usages) / len(memory_usages) / 1024, 2),
         "Not Available"
     ))
     conn.commit()
