@@ -78,10 +78,20 @@
         function runBenchmark() {
             let algorithm = document.getElementById("algo").value;
             let application = document.getElementById("app").value;
+            let packetCount = document.getElementById("packet_count").value;
+            let timeout = document.getElementById("timeout").value;
+            let interfaceName = document.getElementById("interface").value;
+
             fetch('/benchmark', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({algorithm: algorithm, application: application})
+                body: JSON.stringify({
+                    algorithm: algorithm,
+                    application: application,
+                    packet_count: parseInt(packetCount),
+                    timeout: parseInt(timeout),
+                    interface: interfaceName
+                })
             });
         }
     </script>
@@ -102,6 +112,19 @@
             <option value="File Transfer">File Transfer</option>
             <option value="VoIP">VoIP</option>
             <option value="Web Browsing">Web Browsing</option>
+        </select>
+        <br>
+        <label for="packet_count">Number of Packets:</label>
+        <input type="number" id="packet_count" value="50" min="1">
+        <br>
+        <label for="timeout">Timeout (seconds):</label>
+        <input type="number" id="timeout" value="30" min="1">
+        <br>
+        <label for="interface">Select Interface:</label>
+        <select id="interface">
+            <option value="lo0">lo0 (Mac loopback)</option>
+            <option value="eth0">eth0 (RPi Ethernet)</option>
+            <option value="wlan0">wlan0 (RPi Wi-Fi)</option>
         </select>
         <br>
         <button onclick="runBenchmark()">Run Benchmark</button>

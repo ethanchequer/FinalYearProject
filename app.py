@@ -20,9 +20,9 @@ socketio = SocketIO(app)
 NUM_TRIALS = 10 # Define the number of trials per test to improve accuracy
 APPLICATION_TYPES = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"] # Available application types for testing
 
-############
-# DATABASE #
-############
+#############
+# DATABASES #
+#############
 
 # Function to connect to the SQLite results database
 def get_db_connection():
@@ -66,6 +66,30 @@ def initialize_database():
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+    # Table for storing packet stats
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS packet_stats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            algorithm TEXT,
+            application TEXT,
+            original_size INTEGER,
+            encrypted_size INTEGER,
+            encryption_time_ms REAL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Table for storing per-packet encryption latency
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS packet_latency (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            algorithm TEXT,
+            application TEXT,
+            encryption_time_ms REAL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
     conn.commit()
     conn.close()
@@ -138,12 +162,14 @@ def apply_pqc_algorithm(algorithm, payload, public_key):
         return None
 
 # Capture live network packets using scapy
-def capture_packets_with_scapy(algorithm, application, public_key):
+def capture_packets_with_scapy(algorithm, application, public_key, packet_count, timeout, interface):
     """Capture live packets with Scapy and apply PQC encryption on payloads."""
     def process_packet(packet):
         if packet.haslayer(Raw):
             payload = bytes(packet[Raw])
+            start = time.perf_counter()
             encrypted_data = apply_pqc_algorithm(algorithm, payload, public_key)
+            enc_time = (time.perf_counter() - start) * 1000  # ms
             if encrypted_data:
                 conn = get_db_connection()
                 cursor = conn.cursor()
@@ -151,17 +177,26 @@ def capture_packets_with_scapy(algorithm, application, public_key):
                     INSERT INTO encrypted_traffic (algorithm, application, original_size, encrypted_size)
                     VALUES (?, ?, ?, ?)
                 """, (algorithm, application, len(payload), len(encrypted_data)))
+
+                cursor.execute("""
+                    INSERT INTO packet_stats (algorithm, application, original_size, encrypted_size, encryption_time_ms)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (algorithm, application, len(payload), len(encrypted_data), enc_time))
+
+                cursor.execute("""
+                    INSERT INTO packet_latency (algorithm, application, encryption_time_ms)
+                    VALUES (?, ?, ?)
+                """, (algorithm, application, enc_time))
                 conn.commit()
                 conn.close()
 
-    sniff(prn=process_packet, count=10, store=False, timeout=15)
-
+    sniff(prn=process_packet, count=packet_count, store=False, timeout=timeout, iface=interface)
 
 ################
 # BENCHMARKING #
 ################
 
-def benchmark_pqc(algorithm, application):
+def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface="lo0"):
     """Runs the full benchmark process with real-time traffic encryption and refined memory tracking."""
     gc.collect()
     tracemalloc.start()
@@ -181,7 +216,7 @@ def benchmark_pqc(algorithm, application):
         public_key = None
 
     traffic_process = simulate_application_traffic(application)
-    capture_packets_with_scapy(algorithm, application, public_key)
+    capture_packets_with_scapy(algorithm, application, public_key, packet_count, timeout, interface)
 
     if traffic_process:
         traffic_process.terminate()
@@ -237,11 +272,14 @@ def benchmark():
     data = request.json
     algorithm = data.get("algorithm")
     application = data.get("application")
+    packet_count = data.get("packet_count", 50)
+    timeout = data.get("timeout", 30)
+    interface = data.get("interface", "lo0")
 
     if not algorithm or not application:
         return jsonify({"error": "Algorithm or application not selected"}), 400
 
-    thread = threading.Thread(target=benchmark_pqc, args=(algorithm, application))
+    thread = threading.Thread(target=benchmark_pqc, args=(algorithm, application, packet_count, timeout, interface))
     thread.start()
 
     return jsonify({"status": "started"})
@@ -252,8 +290,21 @@ def benchmark():
 def generate_report():
     conn = get_db_connection()
     df = pd.read_sql_query("SELECT * FROM pqc_benchmarks ORDER BY timestamp DESC", conn)
+    latency_df = pd.read_sql_query("""
+        SELECT algorithm, application, AVG(encryption_time_ms) AS avg_latency,
+               MIN(encryption_time_ms) AS min_latency,
+               MAX(encryption_time_ms) AS max_latency
+        FROM packet_latency
+        GROUP BY algorithm, application
+    """, conn)
     conn.close()
-    return render_template("report.html", data=df.to_dict(orient="records"), titles=df.columns.values)
+
+    return render_template(
+        "report.html",
+        data=df.to_dict(orient="records"),
+        titles=df.columns.values,
+        latency_data=latency_df.to_dict(orient="records")
+    )
 
 
 # Function to send execution time data as JSON for execution time bar chart
@@ -267,6 +318,7 @@ def get_execution_times():
     avg_exec_time = df.groupby("algorithm")["execution_time"].mean().reset_index()
 
     return jsonify(avg_exec_time.to_dict(orient="records"))
+
 
 @app.route('/execution_vs_cpu')
 def get_execution_vs_cpu():
@@ -298,6 +350,7 @@ def get_security_levels_tested():
     }
     return jsonify({alg: security_levels.get(alg, "Unknown") for alg in tested_algorithms})
 
+
 # API route to access collected CPU and memory data
 @app.route('/cpu_memory_usage')
 def get_cpu_memory_usage():
@@ -309,6 +362,20 @@ def get_cpu_memory_usage():
     data = df.groupby("algorithm").mean().reset_index().to_dict(orient="records")
 
     return jsonify(data)
+
+
+@app.route('/latency_stats')
+def get_latency_stats():
+    conn = get_db_connection()
+    df = pd.read_sql_query("""
+        SELECT algorithm, application, AVG(encryption_time_ms) AS avg_latency,
+               MIN(encryption_time_ms) AS min_latency,
+               MAX(encryption_time_ms) AS max_latency
+        FROM packet_latency
+        GROUP BY algorithm, application
+    """, conn)
+    conn.close()
+    return jsonify(df.to_dict(orient="records"))
 
 # Initialize Database Before Running
 initialize_database()

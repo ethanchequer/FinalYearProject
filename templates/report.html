@@ -103,6 +103,29 @@
             </tbody>
         </table>
     </div>
+    <div class="table-container">
+        <h3>{{ algorithm }} - Latency Stats</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Application</th>
+                    <th>Average Latency (ms)</th>
+                    <th>Minimum Latency (ms)</th>
+                    <th>Maximum Latency (ms)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for latency in latency_data if latency.algorithm == algorithm %}
+                <tr>
+                    <td>{{ latency.application }}</td>
+                    <td>{{ "%.3f"|format(latency.avg_latency) }}</td>
+                    <td>{{ "%.3f"|format(latency.min_latency) }}</td>
+                    <td>{{ "%.3f"|format(latency.max_latency) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
     {% endfor %}
     <a href="/" class="back-button">Run Another Test</a>
 </div>
