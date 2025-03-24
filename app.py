@@ -118,7 +118,7 @@ def simulate_application_traffic(application):
             # Simulate HTTP GET requests to localhost server
             return subprocess.Popen([
                 "bash", "-c",
-                "for i in {1..10}; do curl -s http://127.0.0.1:8080 > /dev/null; sleep 0.5; done"
+                "for i in {1..10}; do curl -s http://127.0.0.1:8080/test.html > /dev/null; sleep 0.5; done"
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         elif application == "VoIP":
@@ -147,14 +147,14 @@ def apply_pqc_algorithm(algorithm, payload, public_key):
         elif algorithm == "Dilithium2":
             sig = oqs.Signature("Dilithium2")
             signature = sig.sign(payload)
-            if sig.verify(payload, signature, public_key):
-                return signature
+            verified = sig.verify(payload, signature, public_key)
+            return signature if verified else None
 
         elif algorithm in ["SPHINCS+-SHA2-128s-simple", "SPHINCS+-SHAKE-128s-simple"]:
             sig = oqs.Signature(algorithm)
             signature = sig.sign(payload)
-            if sig.verify(payload, signature, public_key):
-                return signature
+            verified = sig.verify(payload, signature, public_key)
+            return signature if verified else None
 
         return None
 
