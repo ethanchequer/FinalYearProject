@@ -19,6 +19,11 @@ socketio = SocketIO(app)
 
 NUM_TRIALS = 10 # Define the number of trials per test to improve accuracy
 APPLICATION_TYPES = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"] # Available application types for testing
+ALGORITHM_MAP = {
+    "SPHINCS+-128s": "SPHINCS+-SHA2-128s-simple",
+    "SPHINCS+-SHA2-128s": "SPHINCS+-SHA2-128s-simple",
+    "SPHINCS+-SHAKE-128s": "SPHINCS+-SHAKE-128s-simple"
+}
 
 #############
 # DATABASES #
@@ -136,8 +141,9 @@ def simulate_application_traffic(application):
 # PQC ENCRYPTION/SIGNING #
 ##########################
 
-def apply_pqc_algorithm(algorithm, payload, public_key):
+def apply_pqc_algorithm(algorithm, payload, public_key, sig_obj=None):
     """ Encrypts or signs a single payload using the selected PQC algorithm in real-time. """
+    print(f"[DEBUG] apply_pqc_algorithm called with algorithm: {algorithm}")
     try:
         if algorithm == "Kyber512":
             kem = oqs.KeyEncapsulation("Kyber512")
@@ -145,31 +151,42 @@ def apply_pqc_algorithm(algorithm, payload, public_key):
             return ciphertext
 
         elif algorithm == "Dilithium2":
-            sig = oqs.Signature("Dilithium2")
-            signature = sig.sign(payload)
-            verified = sig.verify(payload, signature, public_key)
-            return signature if verified else None
+            if sig_obj:
+                signature = sig_obj.sign(payload)
+                return signature
 
         elif algorithm in ["SPHINCS+-SHA2-128s-simple", "SPHINCS+-SHAKE-128s-simple"]:
-            sig = oqs.Signature(algorithm)
-            signature = sig.sign(payload)
-            verified = sig.verify(payload, signature, public_key)
-            return signature if verified else None
+            if sig_obj:
+                signature = sig_obj.sign(payload)
+                return signature
 
         return None
 
     except Exception as e:
+        print(
+            f"[ERROR] Signing failed for {algorithm}: {e} | Payload type: {type(payload)} | Payload size: {len(payload)}")
         return None
 
 # Capture live network packets using scapy
-def capture_packets_with_scapy(algorithm, application, public_key, packet_count, timeout, interface):
+def capture_packets_with_scapy(algorithm, application, packet_count, timeout, interface):
     """Capture live packets with Scapy and apply PQC encryption on payloads."""
+    if algorithm == "Kyber512":
+        kem = oqs.KeyEncapsulation("Kyber512")
+        public_key = kem.generate_keypair()
+    elif algorithm in ["Dilithium2", "SPHINCS+-SHA2-128s-simple", "SPHINCS+-SHAKE-128s-simple"]:
+        sig = oqs.Signature(algorithm)
+        public_key = sig.generate_keypair()
+    else:
+        public_key = None
+        sig = None
+
     def process_packet(packet):
         if packet.haslayer(Raw):
             payload = bytes(packet[Raw])
             start = time.perf_counter()
-            encrypted_data = apply_pqc_algorithm(algorithm, payload, public_key)
+            encrypted_data = apply_pqc_algorithm(algorithm, payload, public_key, sig)
             enc_time = (time.perf_counter() - start) * 1000  # ms
+            print(f"[DEBUG] Algorithm: {algorithm}, Application: {application}, Encrypted: {bool(encrypted_data)}")
             if encrypted_data:
                 conn = get_db_connection()
                 cursor = conn.cursor()
@@ -205,18 +222,8 @@ def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface
     start_cpu = process.cpu_percent(interval=None)
     start_mem = process.memory_info().rss / (1024 * 1024)  # MB
 
-    # Generate keys once at the start
-    if algorithm == "Kyber512":
-        kem = oqs.KeyEncapsulation("Kyber512")
-        public_key = kem.generate_keypair()
-    elif algorithm in ["Dilithium2", "SPHINCS+-SHA2-128s-simple", "SPHINCS+-SHAKE-128s-simple"]:
-        sig = oqs.Signature(algorithm)
-        public_key = sig.generate_keypair()
-    else:
-        public_key = None
-
     traffic_process = simulate_application_traffic(application)
-    capture_packets_with_scapy(algorithm, application, public_key, packet_count, timeout, interface)
+    capture_packets_with_scapy(algorithm, application, packet_count, timeout, interface)
 
     if traffic_process:
         traffic_process.terminate()
@@ -270,7 +277,7 @@ def home():
 @app.route('/benchmark', methods=['POST']) # Creates a /benchmark API route that accepts POST requests
 def benchmark():
     data = request.json
-    algorithm = data.get("algorithm")
+    algorithm = ALGORITHM_MAP.get(data.get("algorithm"), data.get("algorithm"))
     application = data.get("application")
     packet_count = data.get("packet_count", 50)
     timeout = data.get("timeout", 30)
