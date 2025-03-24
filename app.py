@@ -12,6 +12,7 @@ import psutil
 import threading
 import gc
 import tracemalloc
+from scapy.all import sniff, Raw
 
 app = Flask(__name__)
 socketio = SocketIO(app)
@@ -69,6 +70,43 @@ def initialize_database():
     conn.commit()
     conn.close()
 
+######################
+# TRAFFIC SIMULATION #
+######################
+
+# Simulating real application traffic for PQC
+def simulate_application_traffic(application):
+    """Simulates traffic generation for a specific application type using subprocess."""
+    try:
+        if application == "Video Streaming":
+            # Stream a local video file over UDP to localhost
+            return subprocess.Popen([
+                "ffmpeg", "-re", "-i", "sample_video.mp4",
+                "-f", "mpegts", "udp://127.0.0.1:1234"
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        elif application == "File Transfer":
+            # Start a simple HTTP server to simulate file download
+            return subprocess.Popen(["python3", "-m", "http.server", "8080"],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        elif application == "Web Browsing":
+            # Simulate HTTP GET requests to localhost server
+            return subprocess.Popen([
+                "bash", "-c",
+                "for i in {1..10}; do curl -s http://127.0.0.1:8080 > /dev/null; sleep 0.5; done"
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        elif application == "VoIP":
+            # Send periodic UDP packets to simulate voice packets
+            return subprocess.Popen([
+                "bash", "-c",
+                "for i in {1..50}; do echo 'voice' | nc -u -w1 127.0.0.1 5678; sleep 0.2; done"
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    except Exception as e:
+        print(f"Simulation error: {e}")
+        return None
 
 ##########################
 # PQC ENCRYPTION/SIGNING #
@@ -99,15 +137,38 @@ def apply_pqc_algorithm(algorithm, payload, public_key):
     except Exception as e:
         return None
 
+# Capture live network packets using scapy
+def capture_packets_with_scapy(algorithm, application, public_key):
+    """Capture live packets with Scapy and apply PQC encryption on payloads."""
+    def process_packet(packet):
+        if packet.haslayer(Raw):
+            payload = bytes(packet[Raw])
+            encrypted_data = apply_pqc_algorithm(algorithm, payload, public_key)
+            if encrypted_data:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO encrypted_traffic (algorithm, application, original_size, encrypted_size)
+                    VALUES (?, ?, ?, ?)
+                """, (algorithm, application, len(payload), len(encrypted_data)))
+                conn.commit()
+                conn.close()
+
+    sniff(prn=process_packet, count=10, store=False, timeout=15)
+
 
 ################
 # BENCHMARKING #
 ################
 
 def benchmark_pqc(algorithm, application):
-    """ Runs the full benchmark process with real-time traffic encryption. """
+    """Runs the full benchmark process with real-time traffic encryption and refined memory tracking."""
+    gc.collect()
+    tracemalloc.start()
     process = psutil.Process()
-    execution_times, cpu_usages, memory_usages = [], [], []
+    start_time = time.perf_counter()
+    start_cpu = process.cpu_percent(interval=None)
+    start_mem = process.memory_info().rss / (1024 * 1024)  # MB
 
     # Generate keys once at the start
     if algorithm == "Kyber512":
@@ -119,46 +180,24 @@ def benchmark_pqc(algorithm, application):
     else:
         public_key = None
 
-    for _ in range(NUM_TRIALS):
-        # Simulate application data
-        data_chunk = {
-            "File Transfer": b"File data chunk",
-            "Video Streaming": b"Video frame data",
-            "VoIP": b"Voice packet data",
-            "Web Browsing": b"HTTP request data"
-        }.get(application, b"Generic data")
+    traffic_process = simulate_application_traffic(application)
+    capture_packets_with_scapy(algorithm, application, public_key)
 
-        # Start performance tracking
-        start_time = time.perf_counter_ns()
-        start_cpu = process.cpu_percent(interval=None)
-        start_mem = process.memory_info().rss / (1024 * 1024) # Before encryption in KB
-        encrypted_data = apply_pqc_algorithm(algorithm, data_chunk, public_key)
+    if traffic_process:
+        traffic_process.terminate()
 
-        gc.collect() # Force garbage collection to prevent premature memory release
+    # After capturing packets and terminating simulation
+    end_time = time.perf_counter()
+    end_cpu = process.cpu_percent(interval=None)
+    end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+    tracemalloc.stop()
 
-        # End performance tracking
-        execution_time = (time.perf_counter_ns() - start_time) / 1_000_000 # Convert to milliseconds
-        end_cpu = process.cpu_percent(interval=None)
-        end_mem = process.memory_info().rss / (1024 * 1024)  # Initialize with Resident Set Size (KB)
-        end_mem = max(end_mem, process.memory_info().vms / (1024 * 1024))  # Use vms if higher
+    # Calculate performance metrics
+    execution_time = (end_time - start_time)  # in seconds
+    cpu_usage = abs(end_cpu - start_cpu)  # %
+    memory_usage = abs(end_mem - start_mem)  # MB
 
-        execution_times.append(execution_time)
-        cpu_usages.append(abs(end_cpu - start_cpu))
-        memory_usages.append(abs(end_mem - start_mem)) # Compute actual memory difference
-
-        # Store encrypted data size
-        if encrypted_data is not None:
-            original_size = len(data_chunk)
-            encrypted_size = len(encrypted_data)
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO encrypted_traffic (algorithm, application, original_size, encrypted_size)
-                VALUES (?, ?, ?, ?)
-            """, (algorithm, application, original_size, encrypted_size))
-            conn.commit()
-            conn.close()
-
+    # Store benchmark results in DB
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -166,18 +205,18 @@ def benchmark_pqc(algorithm, application):
         VALUES (?, ?, ?, ?, ?, ?)
     """, (
         algorithm, application,
-        round(sum(execution_times) / len(execution_times), 6),  # Store with microsecond precision
-        round(sum(cpu_usages) / len(cpu_usages), 2),
-        round(sum(memory_usages) / len(memory_usages) / 1024, 2),
+        execution_time,
+        cpu_usage,
+        memory_usage,
         "Not Available"
     ))
     conn.commit()
     conn.close()
 
     return {
-        "avg_execution_time_ms": round(sum(execution_times) / len(execution_times), 2),
-        "avg_cpu_usage": round(sum(cpu_usages) / len(cpu_usages), 2),
-        "avg_memory_usage_mb": round(sum(memory_usages) / len(memory_usages), 2),
+        "avg_execution_time_ms": execution_time,
+        "avg_cpu_usage": cpu_usage,
+        "avg_memory_usage_mb": memory_usage,
     }
 
 
