@@ -29,14 +29,10 @@ ALGORITHM_MAP = {
 #############
 # DATABASES #
 #############
-
-# Function to connect to the SQLite results database
 def get_db_connection():
     """ Connect to the SQLite database. """
     conn = sqlite3.connect("pqc_results.db", check_same_thread=False)
     return conn # Returns the SQLite database connection
-
-# Ensure the database and table exist
 def initialize_database():
     """ Initialize the database and tables for results storage. """
     conn = get_db_connection()
@@ -116,8 +112,6 @@ def initialize_database():
 ######################
 # TRAFFIC SIMULATION #
 ######################
-
-# Simulating real application traffic for PQC
 def simulate_application_traffic(application):
     """Simulates traffic generation for a specific application type using subprocess."""
     try:
@@ -154,7 +148,6 @@ def simulate_application_traffic(application):
 ##########################
 # PQC ENCRYPTION/SIGNING #
 ##########################
-
 def apply_pqc_algorithm(algorithm, payload, public_key, sig_obj=None):
     """ Encrypts or signs a single payload using the selected PQC algorithm in real-time. """
     print(f"[DEBUG] apply_pqc_algorithm called with algorithm: {algorithm}")
@@ -182,8 +175,9 @@ def apply_pqc_algorithm(algorithm, payload, public_key, sig_obj=None):
         print(f"[ERROR] Encryption/Signature failed for {algorithm}: {e}")
     return None
 
-# Capture live network packets using scapy
+
 def capture_packets_with_scapy(algorithm, application, packet_count, timeout, interface):
+    """Capture live network packets using scapy"""
     sig = None
 
     if algorithm == "Kyber512":
@@ -259,7 +253,6 @@ def capture_packets_with_scapy(algorithm, application, packet_count, timeout, in
 ################
 # BENCHMARKING #
 ################
-
 def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface="lo0"):
     """Runs the full benchmark process with real-time traffic encryption and refined memory tracking."""
     gc.collect()
@@ -312,15 +305,10 @@ def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface
     }
 
 
-
-
 ##########
 # ROUTES #
 ##########
-
-# Route for Home Page (Frontend)
-# Renders index.html when a user visits /
-@app.route('/') # Defines the route for the home page (/)
+@app.route('/') # # Route for Home Page (index.html)
 def home():
     return render_template("index.html", applications=APPLICATION_TYPES) # Pass available application types to the UI
 
@@ -385,8 +373,8 @@ def reset_database():
     conn.close()
     return jsonify({'message': 'Database cleared successfully.'})
 
-# Report Page (Shows Test Results)
-@app.route('/report') # Defines the /report page route
+
+@app.route('/report') # Defines the Report Page route (Shows Test Results)
 def generate_report():
     conn = get_db_connection()
     df = pd.read_sql_query("""
