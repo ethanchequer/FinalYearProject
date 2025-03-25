@@ -13,9 +13,10 @@ import threading
 import gc
 import tracemalloc
 from scapy.all import sniff, Raw
-
+import eventlet
+eventlet.monkey_patch()
 app = Flask(__name__)
-socketio = SocketIO(app)
+socketio = SocketIO(app, async_mode='eventlet')
 
 NUM_TRIALS = 10 # Define the number of trials per test to improve accuracy
 APPLICATION_TYPES = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"] # Available application types for testing
@@ -156,7 +157,7 @@ def simulate_application_traffic(application):
 
 def apply_pqc_algorithm(algorithm, payload, public_key, sig_obj=None):
     """ Encrypts or signs a single payload using the selected PQC algorithm in real-time. """
-    # print(f"[DEBUG] apply_pqc_algorithm called with algorithm: {algorithm}")
+    print(f"[DEBUG] apply_pqc_algorithm called with algorithm: {algorithm}")
     try:
         if algorithm == "Kyber512":
             kem = oqs.KeyEncapsulation("Kyber512")
@@ -178,7 +179,7 @@ def apply_pqc_algorithm(algorithm, payload, public_key, sig_obj=None):
         return None
 
     except Exception as e:
-          pass
+        print(f"[ERROR] Encryption/Signature failed for {algorithm}: {e}")
     return None
 
 # Capture live network packets using scapy
@@ -201,6 +202,7 @@ def capture_packets_with_scapy(algorithm, application, packet_count, timeout, in
     def process_packet(packet):
         nonlocal total_seen, total_successful
         if packet.haslayer(Raw):
+            print(f"[DEBUG] Raw packet captured: {packet.summary()}")
             total_seen += 1
             payload = bytes(packet[Raw]) + b"x" * 256
             start = time.perf_counter()
@@ -287,6 +289,9 @@ def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface
     # Store benchmark results in DB
     conn = get_db_connection()
     cursor = conn.cursor()
+    with app.app_context():
+        power_usage_data = get_cpu_usage()
+        power_usage = power_usage_data.get_json()[0].get("avg_cpu_usage", "Not Available")
     cursor.execute("""
         INSERT INTO pqc_benchmarks (algorithm, application, execution_time, cpu_usage, memory_usage, power_usage)
         VALUES (?, ?, ?, ?, ?, ?)
@@ -295,7 +300,7 @@ def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface
         execution_time,
         cpu_usage,
         memory_usage,
-        "Not Available"
+        power_usage
     ))
     conn.commit()
     conn.close()
@@ -485,19 +490,36 @@ def get_security_levels_tested():
     }
     return jsonify({alg: security_levels.get(alg, "Unknown") for alg in tested_algorithms})
 
+@app.route('/cpu_usage')
+def get_cpu_usage():
+    conn = get_db_connection()
+    df = pd.read_sql_query("""
+        SELECT algorithm, 
+               AVG(cpu_usage) AS avg_cpu_usage
+        FROM pqc_benchmarks
+        GROUP BY algorithm
+    """, conn)
+    conn.close()
+    return jsonify(df.to_dict(orient="records"))
+
 
 # API route to access collected CPU and memory data
-@app.route('/cpu_memory_usage')
-def get_cpu_memory_usage():
+@app.route('/memory_usage')
+def get_memory_usage():
     conn = get_db_connection()
-    df = pd.read_sql_query("SELECT algorithm, cpu_usage, memory_usage FROM pqc_benchmarks", conn)
+    df = pd.read_sql_query("""
+        SELECT algorithm, 
+               AVG(memory_usage) AS avg_memory_usage, 
+               CASE 
+                   WHEN LOWER(power_usage) = 'not available' OR power_usage IS NULL 
+                   THEN 'Not Available'
+                   ELSE power_usage
+               END AS power_usage
+        FROM pqc_benchmarks
+        GROUP BY algorithm
+    """, conn)
     conn.close()
-
-    # Convert DataFrame to JSON format
-    data = df.groupby("algorithm").mean().reset_index().to_dict(orient="records")
-
-    return jsonify(data)
-
+    return jsonify(df.to_dict(orient="records"))
 
 @app.route('/latency_stats')
 def get_latency_stats():
@@ -517,5 +539,5 @@ initialize_database()
 
 
 # Run Flask App
-if __name__ == '__main__': # If this script is run directly, start the Flask app
-    socketio.run(app, host="192.168.68.155", port=5000, debug=True)
+if __name__ == '__main__':
+    socketio.run(app, host="0.0.0.0", port=8000) # If this script is run directly, start the Flask app
