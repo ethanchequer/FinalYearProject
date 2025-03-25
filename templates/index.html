@@ -4,13 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PQC Benchmarking Tool</title>
+    <script src="https://cdn.socket.io/4.3.2/socket.io.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Tektur:wght@700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Source+Code+Pro:wght@400&display=swap" rel="stylesheet">
     <style>
         /* General Page Styling */
         body {
             font-family: Arial, sans-serif;
             text-align: center;
-            background: radial-gradient(circle at center, #0d1b2a, #1b263b, #0d1b2a);
+            background: radial-gradient(circle at center, #0a0f1c, #0d1b2a, #1b263b);
             color: white;
             margin: 0;
             padding: 0;
@@ -19,7 +21,7 @@
         /* Page Header */
         h1 {
             font-size: 3rem;
-            margin-top: 50px;
+            margin-top: 20px;
             text-shadow: 2px 2px 5px rgba(0, 0, 0, 0.3);
             font-family: 'Tektur', sans-serif;
         }
@@ -28,25 +30,28 @@
         .options-panel label, .options-panel select, .options-panel input {
             font-family: 'Source Code Pro', monospace;
             color: #cceeff;
-            font-size: 1.2rem;
+            font-size: 1.4rem;
         }
 
         select {
-            background: linear-gradient(to right, #444, #222);
+            background: #1b1b2f;
             border: 1px solid #00ffc8;
             border-radius: 5px;
-            color: white;
+            color: #ffffff;
             font-size: 1.1rem;
-            padding: 8px;
+            padding: 10px;
             width: 100%;
             margin-bottom: 15px;
         }
 
         input[type="number"] {
             font-size: 1.1rem;
-            padding: 8px;
+            padding: 10px;
             width: 100%;
             margin-bottom: 15px;
+            background: #1b1b2f;
+            border: 1px solid #00ffc8;
+            color: #ffffff;
         }
 
         /* Benchmark Button */
@@ -86,7 +91,7 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 100vh;
+            height: calc(100vh - 100px);
             gap: 50px;
             padding: 20px;
         }
@@ -102,38 +107,57 @@
         }
     </style>
     <script>
-        function runBenchmark() {
-            let algorithm = document.getElementById("algo").value;
-            let application = document.getElementById("app").value;
-            let packetCount = document.getElementById("packet_count").value;
-            let timeout = document.getElementById("timeout").value;
-            let interfaceName = document.getElementById("interface").value;
+    function runBenchmark() {
+        let algorithm = document.getElementById("algo").value;
+        let application = document.getElementById("app").value;
+        let packetCount = document.getElementById("packet_count").value;
+        let timeout = document.getElementById("timeout").value;
+        let interfaceName = document.getElementById("interface").value;
 
-            document.getElementById("loadingBarContainer").style.display = "block";
-            let progress = 0;
-            const interval = setInterval(() => {
-                if (progress >= 100) {
-                    clearInterval(interval);
-                } else {
-                    progress += 1;
-                    document.getElementById("loadingText").innerText = `Benchmarking... ${progress}%`;
-                    document.getElementById("loadingBar").style.width = `${progress}%`;
-                }
-            }, timeout * 10);
+        fetch('/benchmark', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                algorithm: algorithm,
+                application: application,
+                packet_count: parseInt(packetCount),
+                timeout: parseInt(timeout),
+                interface: interfaceName
+            })
+        });
+    }
 
-            fetch('/benchmark', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    algorithm: algorithm,
-                    application: application,
-                    packet_count: parseInt(packetCount),
-                    timeout: parseInt(timeout),
-                    interface: interfaceName
-                })
-            });
-        }
-    </script>
+    function runAllTests() {
+        fetch('/run_all_tests', {
+            method: 'POST'
+        }).then(() => {
+            alert("All tests started. This may take a while depending on the timeout settings.");
+        });
+    }
+
+    function resetDatabase() {
+    fetch('/reset_database', {
+        method: 'POST'
+    }).then(response => response.json())
+      .then(data => {
+          alert(data.message);
+      });
+}
+
+const socket = io();
+socket.on('test_progress', function(data) {
+    const container = document.getElementById('loadingBarContainer');
+    const bar = document.getElementById('loadingBar');
+    const text = document.getElementById('loadingText');
+    container.style.display = 'block';
+    bar.style.width = data.progress + "%";
+    text.innerText = "Benchmarking... " + data.progress + "% - " + data.test;
+
+    if (data.progress >= 100) {
+        text.innerText = "Completed!";
+    }
+});
+</script>
 </head>
 <body>
     <h1>PQC Benchmarking Tool</h1>
@@ -173,9 +197,11 @@
                 </div>
             </div>
             <a href="/report">View Report</a>
+            <button class="circle-button" style="margin-top: 30px;" onclick="resetDatabase()">Reset Database</button>
         </div>
         <div>
             <button class="circle-button" onclick="runBenchmark()">GO</button>
+            <button class="circle-button" style="margin-top: 30px;" onclick="runAllTests()">ALL</button>
         </div>
     </div>
 </body>

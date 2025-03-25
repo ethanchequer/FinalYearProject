@@ -307,6 +307,8 @@ def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface
     }
 
 
+
+
 ##########
 # ROUTES #
 ##########
@@ -336,6 +338,47 @@ def benchmark():
 
     return jsonify({"status": "started"})
 
+
+@app.route('/run_all_tests', methods=['POST'])
+def run_all_tests():
+    from threading import Thread
+
+    def run_all():
+        algorithms = ["Kyber512", "Dilithium2", "SPHINCS+-128s"]
+        applications = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"]
+        packet_count = 50
+        timeout = 30
+        interface = "lo0"
+
+        total = len(algorithms) * len(applications)
+        completed = 0
+
+        for algo in algorithms:
+            for app in applications:
+                benchmark_pqc(algo, app, packet_count, timeout, interface)
+                completed += 1
+                percent = int((completed / total) * 100)
+                socketio.emit('test_progress', {'progress': percent})
+
+    Thread(target=run_all).start()
+    return '', 204
+
+
+@app.route('/reset_database', methods=['POST'])
+def reset_database():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Clear all known result tables
+    cursor.execute("DELETE FROM pqc_benchmarks")
+    cursor.execute("DELETE FROM encrypted_traffic")
+    cursor.execute("DELETE FROM packet_stats")
+    cursor.execute("DELETE FROM packet_latency")
+    cursor.execute("DELETE FROM packet_loss_stats")
+
+    conn.commit()
+    conn.close()
+    return jsonify({'message': 'Database cleared successfully.'})
 
 # Report Page (Shows Test Results)
 @app.route('/report') # Defines the /report page route
@@ -475,6 +518,4 @@ initialize_database()
 
 # Run Flask App
 if __name__ == '__main__': # If this script is run directly, start the Flask app
-    app.run(host="192.168.68.155", port=5000, debug=True, threaded=True) # Enable debug mode for:
-                        # Automatic reloading on code changes.
-                        # Error traceback in the browser when exceptions occur
+    socketio.run(app, host="192.168.68.155", port=5000, debug=True)
