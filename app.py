@@ -96,6 +96,19 @@ def initialize_database():
         )
     """)
 
+    # Table for packet loss stats
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS packet_loss_stats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            algorithm TEXT,
+            application TEXT,
+            packets_sent INTEGER,
+            packets_received INTEGER,
+            packet_loss_rate REAL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -123,7 +136,7 @@ def simulate_application_traffic(application):
             # Simulate HTTP GET requests to localhost server
             return subprocess.Popen([
                 "bash", "-c",
-                "for i in {1..10}; do curl -s http://127.0.0.1:8080/test.html > /dev/null; sleep 0.5; done"
+                "for i in {1..30}; do curl -s http://127.0.0.1:8080/test.html?rand=$RANDOM > /dev/null; sleep 0.2; done"
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         elif application == "VoIP":
@@ -143,7 +156,7 @@ def simulate_application_traffic(application):
 
 def apply_pqc_algorithm(algorithm, payload, public_key, sig_obj=None):
     """ Encrypts or signs a single payload using the selected PQC algorithm in real-time. """
-    print(f"[DEBUG] apply_pqc_algorithm called with algorithm: {algorithm}")
+    # print(f"[DEBUG] apply_pqc_algorithm called with algorithm: {algorithm}")
     try:
         if algorithm == "Kyber512":
             kem = oqs.KeyEncapsulation("Kyber512")
@@ -153,23 +166,25 @@ def apply_pqc_algorithm(algorithm, payload, public_key, sig_obj=None):
         elif algorithm == "Dilithium2":
             if sig_obj:
                 signature = sig_obj.sign(payload)
-                return signature
+                # verified = sig_obj.verify(payload, signature, public_key)
+                return signature  # if verified else None
 
         elif algorithm in ["SPHINCS+-SHA2-128s-simple", "SPHINCS+-SHAKE-128s-simple"]:
             if sig_obj:
                 signature = sig_obj.sign(payload)
-                return signature
+                # verified = sig_obj.verify(payload, signature, public_key)
+                return signature  # if verified else None
 
         return None
 
     except Exception as e:
-        print(
-            f"[ERROR] Signing failed for {algorithm}: {e} | Payload type: {type(payload)} | Payload size: {len(payload)}")
-        return None
+          pass
+    return None
 
 # Capture live network packets using scapy
 def capture_packets_with_scapy(algorithm, application, packet_count, timeout, interface):
-    """Capture live packets with Scapy and apply PQC encryption on payloads."""
+    sig = None
+
     if algorithm == "Kyber512":
         kem = oqs.KeyEncapsulation("Kyber512")
         public_key = kem.generate_keypair()
@@ -180,14 +195,20 @@ def capture_packets_with_scapy(algorithm, application, packet_count, timeout, in
         public_key = None
         sig = None
 
+    total_seen = 0
+    total_successful = 0
+
     def process_packet(packet):
+        nonlocal total_seen, total_successful
         if packet.haslayer(Raw):
-            payload = bytes(packet[Raw])
+            total_seen += 1
+            payload = bytes(packet[Raw]) + b"x" * 256
             start = time.perf_counter()
             encrypted_data = apply_pqc_algorithm(algorithm, payload, public_key, sig)
             enc_time = (time.perf_counter() - start) * 1000  # ms
-            print(f"[DEBUG] Algorithm: {algorithm}, Application: {application}, Encrypted: {bool(encrypted_data)}")
             if encrypted_data:
+                total_successful += 1
+
                 conn = get_db_connection()
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -208,6 +229,30 @@ def capture_packets_with_scapy(algorithm, application, packet_count, timeout, in
                 conn.close()
 
     sniff(prn=process_packet, count=packet_count, store=False, timeout=timeout, iface=interface)
+
+    # Store packet loss stats
+    loss_rate = ((total_seen - total_successful) / total_seen) if total_seen else 0
+    packets_failed = total_seen - total_successful
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+              INSERT INTO packet_loss_stats (
+          algorithm, application,
+          packets_sent, packets_received,
+          packet_loss_rate,
+          timestamp
+      )
+      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+  """, (
+      algorithm, application,
+      total_seen,
+      total_successful,
+      loss_rate
+  ))
+    conn.commit()
+    conn.close()
+
 
 ################
 # BENCHMARKING #
@@ -296,21 +341,61 @@ def benchmark():
 @app.route('/report') # Defines the /report page route
 def generate_report():
     conn = get_db_connection()
-    df = pd.read_sql_query("SELECT * FROM pqc_benchmarks ORDER BY timestamp DESC", conn)
+    df = pd.read_sql_query("""
+        SELECT 
+            CASE 
+                WHEN algorithm LIKE 'SPHINCS+%' THEN 'SPHINCS+-128s'
+                ELSE algorithm 
+            END AS algorithm,
+            application,
+            execution_time,
+            cpu_usage,
+            memory_usage,
+            power_usage,
+            timestamp
+        FROM pqc_benchmarks
+        ORDER BY timestamp DESC
+    """, conn)
     latency_df = pd.read_sql_query("""
-        SELECT algorithm, application, AVG(encryption_time_ms) AS avg_latency,
-               MIN(encryption_time_ms) AS min_latency,
-               MAX(encryption_time_ms) AS max_latency
+        SELECT 
+            CASE 
+                WHEN algorithm LIKE 'SPHINCS+%' THEN 'SPHINCS+-128s'
+                ELSE algorithm 
+            END AS algorithm,
+            application,
+            AVG(encryption_time_ms) AS avg_latency,
+            MIN(encryption_time_ms) AS min_latency,
+            MAX(encryption_time_ms) AS max_latency
         FROM packet_latency
         GROUP BY algorithm, application
     """, conn)
+
+    loss_df = pd.read_sql_query("""
+              SELECT 
+          CASE 
+              WHEN algorithm LIKE 'SPHINCS+%' THEN 'SPHINCS+-128s'
+              ELSE algorithm 
+          END AS algorithm,
+          application,
+          AVG(packets_sent) AS packets_sent,
+          AVG(packets_received) AS packets_successful,
+          ROUND(AVG(packets_sent) - AVG(packets_received), 2) AS packets_failed,
+          CASE 
+              WHEN AVG(packets_sent) > 0 
+              THEN ROUND((1 - (AVG(packets_received) / AVG(packets_sent))), 2)
+              ELSE 0 
+          END AS packet_loss_rate
+      FROM packet_loss_stats
+      GROUP BY algorithm, application
+  """, conn)
     conn.close()
 
     return render_template(
         "report.html",
         data=df.to_dict(orient="records"),
         titles=df.columns.values,
-        latency_data=latency_df.to_dict(orient="records")
+        latency_data=latency_df.to_dict(orient="records"),
+        packet_loss_data=loss_df.to_dict(orient="records")
     )
 
 

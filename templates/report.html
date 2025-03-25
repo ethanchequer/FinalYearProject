@@ -126,6 +126,31 @@
             </tbody>
         </table>
     </div>
+    <div class="table-container">
+        <h3>{{ algorithm }} - Packet Loss Stats</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Application</th>
+                    <th>Packets Sent</th>
+                    <th>Packets Successful</th>
+                    <th>Packets Failed</th>
+                    <th>Packet Loss (%)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for loss in packet_loss_data if loss.algorithm == algorithm %}
+                <tr>
+                    <td>{{ loss.application }}</td>
+                    <td>{{ loss.packets_sent | round }}</td>
+                    <td>{{ (loss.packets_successful or 0) | round }}</td>
+                    <td>{{ loss.packets_failed | round }}</td>
+                    <td>{{ ((loss.packet_loss_rate or 0) * 100) | round(2) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
     {% endfor %}
     <a href="/" class="back-button">Run Another Test</a>
 </div>
