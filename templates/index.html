@@ -105,6 +105,14 @@
             border-radius: 10px;
             width: 400px;
         }
+
+        .extra-button-container {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-top: 30px;
+            flex-wrap: wrap;
+        }
     </style>
     <script>
     function runBenchmark() {
@@ -142,6 +150,37 @@
       .then(data => {
           alert(data.message);
       });
+}
+
+function runAlgorithmTests(algorithm) {
+    fetch('/run_tests/' + encodeURIComponent(algorithm), {
+        method: 'POST'
+    }).then(() => {
+        alert("Started running tests for " + algorithm + ".");
+    });
+}
+
+function exportCSV() {
+    fetch('/export_csv')
+        .then(response => {
+            if (response.ok) {
+                return response.blob();
+            } else {
+                throw new Error("Failed to export dataset.");
+            }
+        })
+        .then(blob => {
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = "pqc_dataset.csv";
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+        })
+        .catch(error => {
+            alert(error.message);
+        });
 }
 
 const socket = io();
@@ -197,12 +236,18 @@ socket.on('test_progress', function(data) {
                 </div>
             </div>
             <a href="/report">View Report</a>
-            <button class="circle-button" style="margin-top: 30px;" onclick="resetDatabase()">Reset Database</button>
         </div>
         <div>
             <button class="circle-button" onclick="runBenchmark()">GO</button>
             <button class="circle-button" style="margin-top: 30px;" onclick="runAllTests()">ALL</button>
         </div>
+    </div>
+    <div class="extra-button-container">
+        <button class="circle-button" onclick="resetDatabase()">Reset Database</button>
+        <button class="circle-button" onclick="runAlgorithmTests('Kyber512')">Run All Kyber</button>
+        <button class="circle-button" onclick="runAlgorithmTests('Dilithium2')">Run All Dilithium</button>
+        <button class="circle-button" onclick="runAlgorithmTests('SPHINCS+-128s')">Run All SPHINCS</button>
+        <button class="circle-button" onclick="exportCSV()">Export Dataset</button>
     </div>
 </body>
 </html>

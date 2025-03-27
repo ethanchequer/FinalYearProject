@@ -151,6 +151,25 @@
             </tbody>
         </table>
     </div>
+    <div class="table-container">
+        <h3>{{ algorithm }} - Throughput Stats</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Application</th>
+                    <th>Average Throughput (kbps)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for throughput in throughput_data if throughput.algorithm == algorithm %}
+                <tr>
+                    <td>{{ throughput.application }}</td>
+                    <td>{{ "%.2f"|format(throughput.avg_throughput_kbps or 0) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
     {% endfor %}
     <a href="/" class="back-button">Run Another Test</a>
 </div>

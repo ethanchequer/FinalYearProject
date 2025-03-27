@@ -22,8 +22,6 @@ NUM_TRIALS = 10 # Define the number of trials per test to improve accuracy
 APPLICATION_TYPES = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"] # Available application types for testing
 ALGORITHM_MAP = {
     "SPHINCS+-128s": "SPHINCS+-SHA2-128s-simple",
-    "SPHINCS+-SHA2-128s": "SPHINCS+-SHA2-128s-simple",
-    "SPHINCS+-SHAKE-128s": "SPHINCS+-SHAKE-128s-simple"
 }
 
 #############
@@ -42,7 +40,8 @@ def initialize_database():
     columns = [column[1] for column in cursor.fetchall()]
     if "application" not in columns:
         cursor.execute("ALTER TABLE pqc_benchmarks ADD COLUMN application TEXT")
-
+    if "throughput" not in columns:
+        cursor.execute("ALTER TABLE pqc_benchmarks ADD COLUMN throughput REAL")
     # Table for benchmarking results
     cursor.execute("""
             CREATE TABLE IF NOT EXISTS pqc_benchmarks (
@@ -285,6 +284,19 @@ def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface
     cpu_usage = abs(end_cpu - start_cpu)  # %
     memory_usage = abs(end_mem - start_mem)  # MB
 
+    # Calculate throughput
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT SUM(encrypted_size) FROM encrypted_traffic 
+        WHERE algorithm = ? AND application = ? AND timestamp >= datetime('now', '-5 minutes')
+    """, (algorithm, application))
+    result = cursor.fetchone()
+    conn.close()
+
+    total_data_kb = (result[0] or 0) / 1024  # Convert bytes to KB
+    throughput_kbps = total_data_kb / execution_time if execution_time > 0 else 0
+
     # Store benchmark results in DB
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -309,6 +321,7 @@ def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface
         "avg_execution_time_ms": execution_time,
         "avg_cpu_usage": cpu_usage,
         "avg_memory_usage_mb": memory_usage,
+        "avg_throughput_kbps": throughput_kbps
     }
 
 
@@ -339,12 +352,55 @@ def benchmark():
     return jsonify({"status": "started"})
 
 
-@app.route('/run_all_tests', methods=['POST'])
+@app.route('/run_tests/<algorithm>', methods=['POST'])
+def run_algorithm_tests(algorithm):
+    if algorithm == "SPHINCS+-128s":
+        algorithm = "SPHINCS+-SHA2-128s-simple"
+    from threading import Thread
+
+    def run_tests():
+        applications = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"]
+        timeout_map = {
+            "Video Streaming": 60,
+            "File Transfer": 60,
+            "VoIP": 30,
+            "Web Browsing": 60
+        }
+        packet_map = {
+            "Video Streaming": 25,
+            "File Transfer": 25,
+            "VoIP": 25,
+            "Web Browsing": 100
+        }
+        total = len(applications)
+        completed = 0
+
+        for app in applications:
+            print(f"[NEW TEST] Starting test for {algorithm} - {app}")
+            socketio.emit('test_progress', {'progress': int((completed / total) * 100), 'current_test': f"{algorithm} - {app}"})
+            benchmark_pqc(algorithm, app, packet_map[app], timeout_map[app], interface="lo0")
+            completed += 1
+            socketio.emit('test_progress', {'progress': int((completed / total) * 100), 'current_test': f"{algorithm} - {app}"})
+
+        print(f"[DEBUG] Finished all tests for {algorithm}")
+
+    Thread(target=run_tests).start()
+    return '', 204
+
+@app.route('/export_csv')
+def export_csv():
+    conn = get_db_connection()
+    df = pd.read_sql_query("SELECT * FROM pqc_benchmarks", conn)
+    conn.close()
+    csv_path = "pqc_dataset.csv"
+    df.to_csv(csv_path, index=False)
+    return jsonify({'message': f'Exported dataset to {csv_path}'})
+
 def run_all_tests():
     from threading import Thread
 
     def run_all():
-        algorithms = ["Kyber512", "Dilithium2", "SPHINCS+-128s"]
+        algorithms = ["Kyber512", "Dilithium2", "SPHINCS+-SHA2-128s-simple"]
         applications = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"]
         packet_count = 50
         timeout = 30
@@ -358,8 +414,7 @@ def run_all_tests():
                 benchmark_pqc(algo, app, packet_count, timeout, interface)
                 completed += 1
                 percent = int((completed / total) * 100)
-                socketio.emit('test_progress', {'progress': percent})
-
+                socketio.emit('test_progress', {'progress': percent, 'current_test': f"{algo} - {app}"})
     Thread(target=run_all).start()
     return '', 204
 
@@ -523,6 +578,17 @@ def get_latency_stats(): # Access latency stats
                MIN(encryption_time_ms) AS min_latency,
                MAX(encryption_time_ms) AS max_latency
         FROM packet_latency
+        GROUP BY algorithm, application
+    """, conn)
+    conn.close()
+    return jsonify(df.to_dict(orient="records"))
+
+@app.route('/throughput_stats')
+def get_throughput_stats():
+    conn = get_db_connection()
+    df = pd.read_sql_query("""
+        SELECT algorithm, application, AVG(throughput) AS avg_throughput_kbps
+        FROM pqc_benchmarks
         GROUP BY algorithm, application
     """, conn)
     conn.close()
