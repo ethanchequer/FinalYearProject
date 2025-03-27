@@ -105,6 +105,17 @@ def initialize_database():
         )
     """)
 
+    # Table for throughput stats
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS throughput_stats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            algorithm TEXT,
+            application TEXT,
+            throughput_kbps REAL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -317,6 +328,16 @@ def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface
         ))
         conn.commit()
         conn.close()
+    # Store throughput separately
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO throughput_stats (algorithm, application, throughput_kbps)
+        VALUES (?, ?, ?)
+    """, (algorithm, application, throughput_kbps))
+    conn.commit()
+    conn.close()
+
     return {
         "avg_execution_time_ms": execution_time,
         "avg_cpu_usage": cpu_usage,
@@ -486,6 +507,18 @@ def generate_report():
       FROM packet_loss_stats
       GROUP BY algorithm, application
   """, conn)
+
+    throughput_df = pd.read_sql_query("""
+          SELECT 
+              CASE 
+                  WHEN algorithm LIKE 'SPHINCS+%' THEN 'SPHINCS+-128s'
+                  ELSE algorithm 
+              END AS algorithm,
+              application,
+              AVG(throughput_kbps) AS avg_throughput_kbps
+          FROM throughput_stats
+          GROUP BY algorithm, application
+      """, conn)
     conn.close()
 
     return render_template(
@@ -493,7 +526,8 @@ def generate_report():
         data=df.to_dict(orient="records"),
         titles=df.columns.values,
         latency_data=latency_df.to_dict(orient="records"),
-        packet_loss_data=loss_df.to_dict(orient="records")
+        packet_loss_data=loss_df.to_dict(orient="records"),
+        throughput_data=throughput_df.to_dict(orient="records")
     )
 
 
