@@ -131,7 +131,7 @@ def simulate_application_traffic(application):
             # Simulate HTTP GET requests to localhost server
             return subprocess.Popen([
                 "bash", "-c",
-                "for i in {1..30}; do curl -s http://127.0.0.1:8080/test.html?rand=$RANDOM > /dev/null; sleep 0.2; done"
+                "for i in {1..60}; do curl -s --interface lo0 http://127.0.0.1:8080/test.html?rand=$RANDOM > /dev/null; sleep 0.5; done"
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         elif application == "VoIP":
@@ -284,20 +284,21 @@ def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface
     cursor = conn.cursor()
     with app.app_context():
         power_usage_data = get_cpu_usage()
-        power_usage = power_usage_data.get_json()[0].get("avg_cpu_usage", "Not Available")
-    cursor.execute("""
-        INSERT INTO pqc_benchmarks (algorithm, application, execution_time, cpu_usage, memory_usage, power_usage)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (
-        algorithm, application,
-        execution_time,
-        cpu_usage,
-        memory_usage,
-        power_usage
-    ))
-    conn.commit()
-    conn.close()
+        data = power_usage_data.get_json()
+        power_usage = data[0].get("avg_cpu_usage", "Not Available") if data else "Not Available"
 
+        cursor.execute("""
+            INSERT INTO pqc_benchmarks (algorithm, application, execution_time, cpu_usage, memory_usage, power_usage)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            algorithm, application,
+            execution_time,
+            cpu_usage,
+            memory_usage,
+            power_usage
+        ))
+        conn.commit()
+        conn.close()
     return {
         "avg_execution_time_ms": execution_time,
         "avg_cpu_usage": cpu_usage,
@@ -479,7 +480,7 @@ def get_security_levels_tested():
     return jsonify({alg: security_levels.get(alg, "Unknown") for alg in tested_algorithms})
 
 @app.route('/cpu_usage')
-def get_cpu_usage():
+def get_cpu_usage(): # Access collected CPU usage data
     conn = get_db_connection()
     df = pd.read_sql_query("""
         SELECT algorithm, 
@@ -491,9 +492,8 @@ def get_cpu_usage():
     return jsonify(df.to_dict(orient="records"))
 
 
-# API route to access collected CPU and memory data
 @app.route('/memory_usage')
-def get_memory_usage():
+def get_memory_usage(): # Access collected memory usage data
     conn = get_db_connection()
     df = pd.read_sql_query("""
         SELECT algorithm, 
@@ -510,7 +510,7 @@ def get_memory_usage():
     return jsonify(df.to_dict(orient="records"))
 
 @app.route('/latency_stats')
-def get_latency_stats():
+def get_latency_stats(): # Access latency stats
     conn = get_db_connection()
     df = pd.read_sql_query("""
         SELECT algorithm, application, AVG(encryption_time_ms) AS avg_latency,
