@@ -24,9 +24,8 @@ ALGORITHM_MAP = {
     "SPHINCS+-128s": "SPHINCS+-SHA2-128s-simple",
 }
 
-#############
-# DATABASES #
-#############
+
+################## DATABASES ##################
 def get_db_connection():
     """ Connect to the SQLite database. """
     conn = sqlite3.connect("pqc_results.db", check_same_thread=False)
@@ -119,9 +118,8 @@ def initialize_database():
     conn.commit()
     conn.close()
 
-######################
-# TRAFFIC SIMULATION #
-######################
+
+############## TRAFFIC SIMULATION ##############
 def simulate_application_traffic(application):
     """Simulates traffic generation for a specific application type using subprocess."""
     try:
@@ -155,9 +153,8 @@ def simulate_application_traffic(application):
         print(f"Simulation error: {e}")
         return None
 
-##########################
-# PQC ENCRYPTION/SIGNING #
-##########################
+
+############ PQC ENCRYPTION/SIGNING ############
 def apply_pqc_algorithm(algorithm, payload, public_key, sig_obj=None):
     """ Encrypts or signs a single payload using the selected PQC algorithm in real-time. """
     print(f"[DEBUG] apply_pqc_algorithm called with algorithm: {algorithm}")
@@ -186,6 +183,7 @@ def apply_pqc_algorithm(algorithm, payload, public_key, sig_obj=None):
     return None
 
 
+################ PACKET CAPTURE ################
 def capture_packets_with_scapy(algorithm, application, packet_count, timeout, interface):
     """Capture live network packets using scapy"""
     sig = None
@@ -266,9 +264,7 @@ def capture_packets_with_scapy(algorithm, application, packet_count, timeout, in
     conn.close()
 
 
-################
-# BENCHMARKING #
-################
+################# BENCHMARKING #################
 def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface="lo0"):
     """Runs the full benchmark process with real-time traffic encryption and refined memory tracking."""
     gc.collect()
@@ -346,6 +342,33 @@ def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface
     }
 
 
+################ RUN AUTO TESTS ################
+def run_automated_batch(interface="lo0"):
+    algorithms = ["Kyber512", "Dilithium2", "SPHINCS+-SHA2-128s-simple"]
+    applications = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"]
+    packet_options = [20, 50, 100]
+    timeout_options = [15, 30, 60]
+
+    def run_batch():
+        for algo in algorithms:
+            for app in applications:
+                for pkt in packet_options:
+                    for to in timeout_options:
+                        for i in range(3):  # Run each test 3 times
+                            print(f"[DEBUG] Running {algo} - {app} | {pkt} pkts | {to}s timeout [Run {i+1}/3]")
+                            try:
+                                benchmark_pqc(algo, app, pkt, to, interface)
+                                time.sleep(1)  # prevent system overload
+                            except Exception as e:
+                                print(f"[ERROR] Failed: {algo} - {app}, packets={pkt}, timeout={to}, error={e}")
+
+    # Start as background thread so server remains responsive
+    thread = threading.Thread(target=run_batch)
+    thread.start()
+
+    return "Automated batch testing started."
+
+
 ##########
 # ROUTES #
 ##########
@@ -354,7 +377,6 @@ def home():
     return render_template("index.html", applications=APPLICATION_TYPES) # Pass available application types to the UI
 
 
-# Route to Start Benchmarks
 @app.route('/benchmark', methods=['POST']) # Creates a /benchmark API route that accepts POST requests
 def benchmark():
     data = request.json
@@ -407,6 +429,7 @@ def run_algorithm_tests(algorithm):
 
     Thread(target=run_tests).start()
     return '', 204
+
 
 @app.route('/export_csv')
 def export_csv():
@@ -605,6 +628,7 @@ def get_security_levels_tested():
         "SPHINCS+-SHA2-256s": 5, "SPHINCS+-SHA2-256f": 5
     }
     return jsonify({alg: security_levels.get(alg, "Unknown") for alg in tested_algorithms})
+
 
 @app.route('/cpu_usage')
 def get_cpu_usage(): # Access collected CPU usage data
