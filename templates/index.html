@@ -106,13 +106,6 @@
             width: 400px;
         }
 
-        .extra-button-container {
-            display: flex;
-            gap: 15px;
-            justify-content: center;
-            margin-top: 30px;
-            flex-wrap: wrap;
-        }
     </style>
     <script>
     function runBenchmark() {
@@ -183,6 +176,21 @@ function exportCSV() {
         });
 }
 
+function runBatchTests() {
+    const interfaceName = document.getElementById("interface").value;
+
+    fetch('/run_batch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ interface: interfaceName })
+    }).then(response => response.json())
+      .then(data => {
+          alert(data.message || "Batch tests started.");
+      }).catch(error => {
+          alert("Failed to start batch tests.");
+      });
+}
+
 const socket = io();
 socket.on('test_progress', function(data) {
     const container = document.getElementById('loadingBarContainer');
@@ -232,7 +240,7 @@ socket.on('test_progress', function(data) {
             <div id="loadingBarContainer" style="margin-top: 30px; display: none;">
                 <p id="loadingText">Benchmarking... 0%</p>
                 <div style="width: 100%; background-color: #222; border-radius: 5px; overflow: hidden;">
-                    <div id="loadingBar" style="width: 0%; height: 10px; background-color: #00ffc8;"></div>
+                    <div id="loadingBar" style="width: 0%; height: 10px; background-color: #00ffc8; transition: width 0.3s;"></div>
                 </div>
             </div>
             <a href="/report">View Report</a>
@@ -240,14 +248,37 @@ socket.on('test_progress', function(data) {
         <div>
             <button class="circle-button" onclick="runBenchmark()">GO</button>
             <button class="circle-button" style="margin-top: 30px;" onclick="runAllTests()">ALL</button>
+            <p id="confirmation" style="color: yellow;"></p>
+            <p id="batchProgress" style="color: lightgreen;"></p>
         </div>
     </div>
-    <div class="extra-button-container">
-        <button class="circle-button" onclick="resetDatabase()">Reset Database</button>
-        <button class="circle-button" onclick="runAlgorithmTests('Kyber512')">Run All Kyber</button>
-        <button class="circle-button" onclick="runAlgorithmTests('Dilithium2')">Run All Dilithium</button>
-        <button class="circle-button" onclick="runAlgorithmTests('SPHINCS+-128s')">Run All SPHINCS</button>
-        <button class="circle-button" onclick="exportCSV()">Export Dataset</button>
+    <div style="display: flex; flex-direction: column; align-items: center; margin-top: 40px;">
+        <div style="display: flex; flex-wrap: wrap; gap: 15px; justify-content: center; max-width: 900px;">
+            <button class="circle-button" onclick="resetDatabase()">Reset Database</button>
+            <button class="circle-button" onclick="runAlgorithmTests('Kyber512')">Run All Kyber</button>
+            <button class="circle-button" onclick="runAlgorithmTests('Dilithium2')">Run All Dilithium</button>
+            <button class="circle-button" onclick="runAlgorithmTests('SPHINCS+-128s')">Run All SPHINCS</button>
+            <button class="circle-button" onclick="exportCSV()">Export Dataset</button>
+            <button class="circle-button" onclick="runBatchTests()">Run Full Batch</button>
+        </div>
     </div>
+<script>
+  document.getElementById("runBatchBtn").addEventListener("click", function () {
+    if (confirm("Are you sure you want to start the full batch test? This may take a long time.")) {
+      document.getElementById("confirmation").textContent = "Batch test started. Please wait...";
+      fetch("/run_batch", {
+        method: "POST"
+      })
+      .then(response => response.json())
+      .then(data => {
+        document.getElementById("batchProgress").textContent = data.message;
+      })
+      .catch(error => {
+        console.error("Error:", error);
+        document.getElementById("batchProgress").textContent = "Something went wrong!";
+      });
+    }
+  });
+</script>
 </body>
 </html>

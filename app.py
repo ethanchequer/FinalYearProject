@@ -347,18 +347,18 @@ def run_automated_batch(interface="lo0"):
     algorithms = ["Kyber512", "Dilithium2", "SPHINCS+-SHA2-128s-simple"]
     applications = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"]
     packet_options = [20, 50, 100]
-    timeout_options = [15, 30, 60]
+    timeout_options = [15, 20, 30]
 
     def run_batch():
         for algo in algorithms:
             for app in applications:
                 for pkt in packet_options:
                     for to in timeout_options:
-                        for i in range(3):  # Run each test 3 times
-                            print(f"[DEBUG] Running {algo} - {app} | {pkt} pkts | {to}s timeout [Run {i+1}/3]")
+                        for i in range(2):  # Run each test 3 times
+                            print(f"[PROGRESS UPDATE] Running {algo} - {app} | {pkt} pkts | {to}s timeout [Run {i+1}/3]")
                             try:
                                 benchmark_pqc(algo, app, pkt, to, interface)
-                                time.sleep(1)  # prevent system overload
+                                time.sleep(1)  # to prevent system overload
                             except Exception as e:
                                 print(f"[ERROR] Failed: {algo} - {app}, packets={pkt}, timeout={to}, error={e}")
 
@@ -431,44 +431,59 @@ def run_algorithm_tests(algorithm):
     return '', 204
 
 
+@app.route('/run_batch', methods=['POST'])
+def trigger_batch():
+    thread = threading.Thread(target=run_automated_batch, args=("lo0",))
+    thread.start()
+    return jsonify({"message": "Automated batch test started."})
+
+
 @app.route('/export_csv')
 def export_csv():
     conn = get_db_connection()
     df = pd.read_sql_query("""
         SELECT 
-            b.algorithm,
+            b.id,
+            CASE 
+                WHEN b.algorithm LIKE 'SPHINCS+%' THEN 'SPHINCS+-128s'
+                ELSE b.algorithm 
+            END AS algorithm,
             b.application,
             b.execution_time,
             b.cpu_usage,
             b.memory_usage,
             b.power_usage,
             b.timestamp,
-            COALESCE(pl.packets_sent, 0) AS packet_count_requested,
-            COALESCE(pl.packets_sent, 0) AS packets_sent,
-            COALESCE(pl.packets_received, 0) AS packets_received,
-            COALESCE(pl.packets_failed, 0) AS packets_failed,
-            COALESCE(pl.packet_loss_rate, 0) AS packet_loss,
-            COALESCE(lat.avg_latency, 0) AS avg_latency,
-            COALESCE(tp.throughput_kbps, 0) AS avg_throughput_kbps        
+            ps.packets_sent,
+            ps.packets_received,
+            ps.packets_failed,
+            ps.packet_loss_rate,
+            lat.avg_latency,
+            th.avg_throughput_kbps
         FROM pqc_benchmarks b
         LEFT JOIN (
-            SELECT algorithm, application, timestamp, packets_sent, packets_received, packets_failed, packet_loss_rate
+            SELECT algorithm, application, timestamp,
+                   packets_sent, packets_received,
+                   packets_failed, packet_loss_rate
             FROM packet_loss_stats
-        ) pl ON b.algorithm = pl.algorithm AND b.application = pl.application AND DATE(b.timestamp) = DATE(pl.timestamp)
+        ) ps ON b.algorithm = ps.algorithm AND b.application = ps.application AND b.timestamp = ps.timestamp
         LEFT JOIN (
-            SELECT algorithm, application, AVG(encryption_time_ms) AS avg_latency, DATE(timestamp) as date
+            SELECT algorithm, application, timestamp,
+                   AVG(encryption_time_ms) AS avg_latency
             FROM packet_latency
-            GROUP BY algorithm, application, DATE(timestamp)
-        ) lat ON b.algorithm = lat.algorithm AND b.application = lat.application AND DATE(b.timestamp) = lat.date
+            GROUP BY algorithm, application, timestamp
+        ) lat ON b.algorithm = lat.algorithm AND b.application = lat.application AND b.timestamp = lat.timestamp
         LEFT JOIN (
-            SELECT algorithm, application, throughput_kbps, timestamp
+            SELECT algorithm, application, timestamp,
+                   AVG(throughput_kbps) AS avg_throughput_kbps
             FROM throughput_stats
-        ) tp ON b.algorithm = tp.algorithm AND b.application = tp.application AND DATE(b.timestamp) = DATE(tp.timestamp)
-        ORDER BY b.timestamp DESC
+            GROUP BY algorithm, application, timestamp
+        ) th ON b.algorithm = th.algorithm AND b.application = th.application AND b.timestamp = th.timestamp
     """, conn)
-    conn.close()
+
     csv_path = "pqc_dataset.csv"
     df.to_csv(csv_path, index=False)
+    conn.close()
     return send_file(csv_path, mimetype='text/csv', as_attachment=True)
 
 
@@ -660,6 +675,7 @@ def get_memory_usage(): # Access collected memory usage data
     conn.close()
     return jsonify(df.to_dict(orient="records"))
 
+
 @app.route('/latency_stats')
 def get_latency_stats(): # Access latency stats
     conn = get_db_connection()
@@ -673,6 +689,7 @@ def get_latency_stats(): # Access latency stats
     conn.close()
     return jsonify(df.to_dict(orient="records"))
 
+
 @app.route('/throughput_stats')
 def get_throughput_stats():
     conn = get_db_connection()
@@ -683,6 +700,7 @@ def get_throughput_stats():
     """, conn)
     conn.close()
     return jsonify(df.to_dict(orient="records"))
+
 
 # Initialize Database Before Running
 initialize_database()
