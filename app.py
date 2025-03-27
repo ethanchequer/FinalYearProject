@@ -1,6 +1,6 @@
 # app.py handles benchmarking and web routes
 # This version of the app runs the execution time, CPU, memory and power usage for the PQC benchmarks.
-from flask import Flask, request, jsonify, render_template, redirect, url_for # imports Flask and sets up the app
+from flask import Flask, request, jsonify, render_template, redirect, url_for, send_file # imports Flask and sets up the app
 from flask_socketio import SocketIO, emit
 import time
 import oqs # Python bindings for the OQS library
@@ -411,11 +411,43 @@ def run_algorithm_tests(algorithm):
 @app.route('/export_csv')
 def export_csv():
     conn = get_db_connection()
-    df = pd.read_sql_query("SELECT * FROM pqc_benchmarks", conn)
+    df = pd.read_sql_query("""
+        SELECT 
+            b.algorithm,
+            b.application,
+            b.execution_time,
+            b.cpu_usage,
+            b.memory_usage,
+            b.power_usage,
+            b.timestamp,
+            COALESCE(pl.packets_sent, 0) AS packet_count_requested,
+            COALESCE(pl.packets_sent, 0) AS packets_sent,
+            COALESCE(pl.packets_received, 0) AS packets_received,
+            COALESCE(pl.packets_failed, 0) AS packets_failed,
+            COALESCE(pl.packet_loss_rate, 0) AS packet_loss,
+            COALESCE(lat.avg_latency, 0) AS avg_latency,
+            COALESCE(tp.throughput_kbps, 0) AS avg_throughput_kbps        
+        FROM pqc_benchmarks b
+        LEFT JOIN (
+            SELECT algorithm, application, timestamp, packets_sent, packets_received, packets_failed, packet_loss_rate
+            FROM packet_loss_stats
+        ) pl ON b.algorithm = pl.algorithm AND b.application = pl.application AND DATE(b.timestamp) = DATE(pl.timestamp)
+        LEFT JOIN (
+            SELECT algorithm, application, AVG(encryption_time_ms) AS avg_latency, DATE(timestamp) as date
+            FROM packet_latency
+            GROUP BY algorithm, application, DATE(timestamp)
+        ) lat ON b.algorithm = lat.algorithm AND b.application = lat.application AND DATE(b.timestamp) = lat.date
+        LEFT JOIN (
+            SELECT algorithm, application, throughput_kbps, timestamp
+            FROM throughput_stats
+        ) tp ON b.algorithm = tp.algorithm AND b.application = tp.application AND DATE(b.timestamp) = DATE(tp.timestamp)
+        ORDER BY b.timestamp DESC
+    """, conn)
     conn.close()
     csv_path = "pqc_dataset.csv"
     df.to_csv(csv_path, index=False)
-    return jsonify({'message': f'Exported dataset to {csv_path}'})
+    return send_file(csv_path, mimetype='text/csv', as_attachment=True)
+
 
 def run_all_tests():
     from threading import Thread
