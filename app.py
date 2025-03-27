@@ -195,34 +195,39 @@ def capture_packets_with_scapy(algorithm, application, packet_count, timeout, in
 
     def process_packet(packet):
         nonlocal total_seen, total_successful
+        total_seen += 1  # Count all packets
+
         if packet.haslayer(Raw):
             print(f"[DEBUG] Raw packet captured: {packet.summary()}")
-            total_seen += 1
-            payload = bytes(packet[Raw]) + b"x" * 256
-            start = time.perf_counter()
-            encrypted_data = apply_pqc_algorithm(algorithm, payload, public_key, sig)
-            enc_time = (time.perf_counter() - start) * 1000  # ms
-            if encrypted_data:
-                total_successful += 1
+        else:
+            print(f"[DEBUG] Packet seen (non-Raw): {packet.summary()}")
 
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT INTO encrypted_traffic (algorithm, application, original_size, encrypted_size)
-                    VALUES (?, ?, ?, ?)
-                """, (algorithm, application, len(payload), len(encrypted_data)))
+        payload = bytes(packet[Raw]) + b"x" * 256 if packet.haslayer(Raw) else b"x" * 256
+        start = time.perf_counter()
+        encrypted_data = apply_pqc_algorithm(algorithm, payload, public_key, sig)
+        enc_time = (time.perf_counter() - start) * 1000  # ms
 
-                cursor.execute("""
-                    INSERT INTO packet_stats (algorithm, application, original_size, encrypted_size, encryption_time_ms)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (algorithm, application, len(payload), len(encrypted_data), enc_time))
+        if encrypted_data:
+            total_successful += 1
 
-                cursor.execute("""
-                    INSERT INTO packet_latency (algorithm, application, encryption_time_ms)
-                    VALUES (?, ?, ?)
-                """, (algorithm, application, enc_time))
-                conn.commit()
-                conn.close()
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO encrypted_traffic (algorithm, application, original_size, encrypted_size)
+                VALUES (?, ?, ?, ?)
+            """, (algorithm, application, len(payload), len(encrypted_data)))
+
+            cursor.execute("""
+                INSERT INTO packet_stats (algorithm, application, original_size, encrypted_size, encryption_time_ms)
+                VALUES (?, ?, ?, ?, ?)
+            """, (algorithm, application, len(payload), len(encrypted_data), enc_time))
+
+            cursor.execute("""
+                INSERT INTO packet_latency (algorithm, application, encryption_time_ms)
+                VALUES (?, ?, ?)
+            """, (algorithm, application, enc_time))
+            conn.commit()
+            conn.close()
 
     sniff(prn=process_packet, count=packet_count, store=False, timeout=timeout, iface=interface)
 
@@ -235,15 +240,16 @@ def capture_packets_with_scapy(algorithm, application, packet_count, timeout, in
     cursor.execute("""
               INSERT INTO packet_loss_stats (
           algorithm, application,
-          packets_sent, packets_received,
-          packet_loss_rate,
+          packets_sent, packets_received, 
+          packets_failed, packet_loss_rate,
           timestamp
       )
-      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
   """, (
       algorithm, application,
       total_seen,
       total_successful,
+      packets_failed,
       loss_rate
   ))
     conn.commit()
