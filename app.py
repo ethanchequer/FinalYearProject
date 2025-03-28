@@ -41,6 +41,10 @@ def initialize_database():
         cursor.execute("ALTER TABLE pqc_benchmarks ADD COLUMN application TEXT")
     if "throughput" not in columns:
         cursor.execute("ALTER TABLE pqc_benchmarks ADD COLUMN throughput REAL")
+    if "timeout" not in columns:
+        cursor.execute("ALTER TABLE pqc_benchmarks ADD COLUMN timeout INTEGER")
+    if "packet_count_requested" not in columns:
+        cursor.execute("ALTER TABLE pqc_benchmarks ADD COLUMN packet_count_requested INTEGER")
     # Table for benchmarking results
     cursor.execute("""
             CREATE TABLE IF NOT EXISTS pqc_benchmarks (
@@ -281,6 +285,7 @@ def capture_packets_with_scapy(algorithm, application, packet_count, timeout, in
   ))
     conn.commit()
     conn.close()
+    return total_seen, total_successful
 
 
 ################# BENCHMARKING #################
@@ -294,7 +299,12 @@ def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface
     start_mem = process.memory_info().rss / (1024 * 1024)  # MB
 
     traffic_process = simulate_application_traffic(application)
-    capture_packets_with_scapy(algorithm, application, packet_count, timeout, interface)
+    result = capture_packets_with_scapy(algorithm, application, packet_count, timeout, interface)
+    if result:
+        total_seen, total_successful = result
+    else:
+        print(f"[WARN] capture_packets_with_scapy returned None for {algorithm} - {application}")
+        total_seen, total_successful = 0, 0
 
     if traffic_process:
         traffic_process.terminate()
@@ -332,14 +342,16 @@ def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface
         power_usage = data[0].get("avg_cpu_usage", "Not Available") if data else "Not Available"
 
         cursor.execute("""
-            INSERT INTO pqc_benchmarks (algorithm, application, execution_time, cpu_usage, memory_usage, power_usage)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO pqc_benchmarks (algorithm, application, execution_time, cpu_usage, memory_usage, power_usage, timeout, packet_count_requested)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             algorithm, application,
             execution_time,
             cpu_usage,
             memory_usage,
-            power_usage
+            power_usage,
+            timeout,
+            packet_count
         ))
         conn.commit()
         conn.close()
@@ -365,15 +377,15 @@ def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface
 def run_automated_batch(interface="lo0"):
     algorithms = ["Kyber512", "Dilithium2", "SPHINCS+-SHA2-128s-simple"]
     applications = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"]
-    packet_options = [20, 50, 100]
-    timeout_options = [15, 20, 30]
+    packet_options = [20, 50, 100, 200, 500]
+    timeout_options = [10, 20, 30, 40, 50, 60]
 
     def run_batch():
         for algo in algorithms:
             for app in applications:
                 for pkt in packet_options:
                     for to in timeout_options:
-                        for i in range(2):  # Run each test 3 times
+                        for i in range(3):  # Run each test 3 times
                             print(f"[PROGRESS UPDATE] Running {algo} - {app} | {pkt} pkts | {to}s timeout [Run {i+1}/3]")
                             try:
                                 benchmark_pqc(algo, app, pkt, to, interface)
@@ -472,6 +484,7 @@ SELECT
     b.cpu_usage,
     b.memory_usage,
     b.power_usage,
+    b.timeout,
     b.timestamp,
     ps.packets_sent,
     ps.packets_received,
@@ -479,12 +492,7 @@ SELECT
     ps.packet_loss_rate,
     lat.encryption_time_ms AS latency_per_test,
     th.avg_throughput_kbps,
-    CASE 
-        WHEN b.application = 'Web Browsing' THEN 100
-        WHEN b.application IN ('File Transfer', 'Video Streaming') THEN 25
-        WHEN b.application = 'VoIP' THEN 25
-        ELSE NULL
-    END AS packet_count_requested
+    b.packet_count_requested
 FROM pqc_benchmarks b
 LEFT JOIN (
     SELECT algorithm, application, timestamp,
