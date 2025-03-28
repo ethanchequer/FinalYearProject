@@ -124,16 +124,24 @@ def simulate_application_traffic(application):
     """Simulates traffic generation for a specific application type using subprocess."""
     try:
         if application == "Video Streaming":
-            # Stream a local video file over UDP to localhost
+            # Check if the sample video exists before streaming
+            if not os.path.exists("sample_video.mp4"):
+                print("[ERROR] sample_video.mp4 not found. Skipping video streaming simulation.")
+                return None
             return subprocess.Popen([
                 "ffmpeg", "-re", "-i", "sample_video.mp4",
                 "-f", "mpegts", "udp://127.0.0.1:1234"
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         elif application == "File Transfer":
-            # Start a simple HTTP server to simulate file download
-            return subprocess.Popen(["python3", "-m", "http.server", "8080"],
-                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Start a simple HTTP server and simulate file downloads
+            server_process = subprocess.Popen(["python3", "-m", "http.server", "8080"],
+                                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(1)  # Allow server to start
+            return subprocess.Popen([
+                "bash", "-c",
+                "for i in {1..10}; do curl -s http://127.0.0.1:8080/test.file > /dev/null; sleep 1; done"
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         elif application == "Web Browsing":
             # Simulate HTTP GET requests to localhost server
@@ -186,6 +194,7 @@ def apply_pqc_algorithm(algorithm, payload, public_key, sig_obj=None):
 ################ PACKET CAPTURE ################
 def capture_packets_with_scapy(algorithm, application, packet_count, timeout, interface):
     """Capture live network packets using scapy"""
+    latency_recorded = False
     sig = None
 
     if algorithm == "Kyber512":
@@ -234,10 +243,20 @@ def capture_packets_with_scapy(algorithm, application, packet_count, timeout, in
                 INSERT INTO packet_latency (algorithm, application, encryption_time_ms)
                 VALUES (?, ?, ?)
             """, (algorithm, application, enc_time))
+            latency_recorded = True
+            print(f"[DEBUG] Logged latency: {enc_time:.3f}ms for {algorithm} - {application}")
             conn.commit()
             conn.close()
 
+    time.sleep(1)  # Delay to allow traffic to start
     sniff(prn=process_packet, count=packet_count, store=False, timeout=timeout, iface=interface)
+
+    # Store packet loss stats
+    loss_rate = ((total_seen - total_successful) / total_seen) if total_seen else 0
+    packets_failed = total_seen - total_successful
+
+    if not latency_recorded:
+        print(f"[WARN] No latency recorded for {algorithm} - {application}")
 
     # Store packet loss stats
     loss_rate = ((total_seen - total_successful) / total_seen) if total_seen else 0
@@ -442,43 +461,52 @@ def trigger_batch():
 def export_csv():
     conn = get_db_connection()
     df = pd.read_sql_query("""
-        SELECT 
-            b.id,
-            CASE 
-                WHEN b.algorithm LIKE 'SPHINCS+%' THEN 'SPHINCS+-128s'
-                ELSE b.algorithm 
-            END AS algorithm,
-            b.application,
-            b.execution_time,
-            b.cpu_usage,
-            b.memory_usage,
-            b.power_usage,
-            b.timestamp,
-            ps.packets_sent,
-            ps.packets_received,
-            ps.packets_failed,
-            ps.packet_loss_rate,
-            lat.avg_latency,
-            th.avg_throughput_kbps
-        FROM pqc_benchmarks b
-        LEFT JOIN (
-            SELECT algorithm, application, timestamp,
-                   packets_sent, packets_received,
-                   packets_failed, packet_loss_rate
-            FROM packet_loss_stats
-        ) ps ON b.algorithm = ps.algorithm AND b.application = ps.application AND b.timestamp = ps.timestamp
-        LEFT JOIN (
-            SELECT algorithm, application, timestamp,
-                   AVG(encryption_time_ms) AS avg_latency
-            FROM packet_latency
-            GROUP BY algorithm, application, timestamp
-        ) lat ON b.algorithm = lat.algorithm AND b.application = lat.application AND b.timestamp = lat.timestamp
-        LEFT JOIN (
-            SELECT algorithm, application, timestamp,
-                   AVG(throughput_kbps) AS avg_throughput_kbps
-            FROM throughput_stats
-            GROUP BY algorithm, application, timestamp
-        ) th ON b.algorithm = th.algorithm AND b.application = th.application AND b.timestamp = th.timestamp
+SELECT 
+    b.id,
+    CASE 
+        WHEN b.algorithm LIKE 'SPHINCS+%' THEN 'SPHINCS+-128s'
+        ELSE b.algorithm 
+    END AS algorithm,
+    b.application,
+    b.execution_time,
+    b.cpu_usage,
+    b.memory_usage,
+    b.power_usage,
+    b.timestamp,
+    ps.packets_sent,
+    ps.packets_received,
+    ps.packets_failed,
+    ps.packet_loss_rate,
+    lat.encryption_time_ms AS latency_per_test,
+    th.avg_throughput_kbps,
+    CASE 
+        WHEN b.application = 'Web Browsing' THEN 100
+        WHEN b.application IN ('File Transfer', 'Video Streaming') THEN 25
+        WHEN b.application = 'VoIP' THEN 25
+        ELSE NULL
+    END AS packet_count_requested
+FROM pqc_benchmarks b
+LEFT JOIN (
+    SELECT algorithm, application, timestamp,
+           packets_sent, packets_received,
+           packets_failed, packet_loss_rate
+    FROM packet_loss_stats
+) ps ON b.algorithm = ps.algorithm AND b.application = ps.application AND b.timestamp = ps.timestamp
+LEFT JOIN (
+    SELECT algorithm, application, timestamp, encryption_time_ms
+    FROM packet_latency
+    WHERE id IN (
+        SELECT MAX(id)
+        FROM packet_latency
+        GROUP BY algorithm, application, timestamp
+    )
+) lat ON b.algorithm = lat.algorithm AND b.application = lat.application AND b.timestamp = lat.timestamp
+LEFT JOIN (
+    SELECT algorithm, application, timestamp,
+           AVG(throughput_kbps) AS avg_throughput_kbps
+    FROM throughput_stats
+    GROUP BY algorithm, application, timestamp
+) th ON b.algorithm = th.algorithm AND b.application = th.application AND b.timestamp = th.timestamp       
     """, conn)
 
     csv_path = "pqc_dataset.csv"
