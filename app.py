@@ -296,7 +296,7 @@ def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface
     process = psutil.Process()
     start_time = time.perf_counter()
     start_cpu = process.cpu_percent(interval=None)
-    start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+    start_mem = process.memory_info().vms / (1024 * 1024)  # MB
 
     traffic_process = simulate_application_traffic(application)
     result = capture_packets_with_scapy(algorithm, application, packet_count, timeout, interface)
@@ -312,7 +312,7 @@ def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface
     # After capturing packets and terminating simulation
     end_time = time.perf_counter()
     end_cpu = process.cpu_percent(interval=None)
-    end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+    end_mem = process.memory_info().vms / (1024 * 1024)  # MB
     tracemalloc.stop()
 
     # Calculate performance metrics
