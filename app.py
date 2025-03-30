@@ -377,8 +377,8 @@ def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface
 def run_automated_batch(interface="eth0"):
     algorithms = ["Kyber512", "Dilithium2", "SPHINCS+-SHA2-128s-simple"]
     applications = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"]
-    packet_options = [20, 50, 100, 200, 500]
-    timeout_options = [10, 20, 30, 40, 50, 60]
+    packet_options = [20, 50, 100, 200]
+    timeout_options = [10, 30, 60]
 
     def run_batch():
         for algo in algorithms:
