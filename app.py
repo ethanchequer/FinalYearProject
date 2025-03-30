@@ -151,7 +151,7 @@ def simulate_application_traffic(application):
             # Simulate HTTP GET requests to localhost server
             return subprocess.Popen([
                 "bash", "-c",
-                "for i in {1..60}; do curl -s --interface lo0 http://127.0.0.1:8080/test.html?rand=$RANDOM > /dev/null; sleep 0.5; done"
+                "for i in {1..60}; do curl -s --interface eth0 http://127.0.0.1:8080/test.html?rand=$RANDOM > /dev/null; sleep 0.5; done"
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         elif application == "VoIP":
@@ -289,14 +289,14 @@ def capture_packets_with_scapy(algorithm, application, packet_count, timeout, in
 
 
 ################# BENCHMARKING #################
-def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface="lo0"):
+def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface="eth0"):
     """Runs the full benchmark process with real-time traffic encryption and refined memory tracking."""
     gc.collect()
     tracemalloc.start()
     process = psutil.Process()
     start_time = time.perf_counter()
     start_cpu = process.cpu_percent(interval=None)
-    start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+    start_mem = process.memory_info().vms / (1024 * 1024)  # MB
 
     traffic_process = simulate_application_traffic(application)
     result = capture_packets_with_scapy(algorithm, application, packet_count, timeout, interface)
@@ -312,7 +312,7 @@ def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface
     # After capturing packets and terminating simulation
     end_time = time.perf_counter()
     end_cpu = process.cpu_percent(interval=None)
-    end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+    end_mem = process.memory_info().vms / (1024 * 1024)  # MB
     tracemalloc.stop()
 
     # Calculate performance metrics
@@ -374,7 +374,7 @@ def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface
 
 
 ################ RUN AUTO TESTS ################
-def run_automated_batch(interface="lo0"):
+def run_automated_batch(interface="eth0"):
     algorithms = ["Kyber512", "Dilithium2", "SPHINCS+-SHA2-128s-simple"]
     applications = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"]
     packet_options = [20, 50, 100, 200, 500]
@@ -415,7 +415,7 @@ def benchmark():
     application = data.get("application")
     packet_count = data.get("packet_count", 50)
     timeout = data.get("timeout", 30)
-    interface = data.get("interface", "lo0")
+    interface = data.get("interface", "eth0")
 
     if not algorithm or not application:
         return jsonify({"error": "Algorithm or application not selected"}), 400
@@ -452,7 +452,7 @@ def run_algorithm_tests(algorithm):
         for app in applications:
             print(f"[NEW TEST] Starting test for {algorithm} - {app}")
             socketio.emit('test_progress', {'progress': int((completed / total) * 100), 'current_test': f"{algorithm} - {app}"})
-            benchmark_pqc(algorithm, app, packet_map[app], timeout_map[app], interface="lo0")
+            benchmark_pqc(algorithm, app, packet_map[app], timeout_map[app], interface="eth0")
             completed += 1
             socketio.emit('test_progress', {'progress': int((completed / total) * 100), 'current_test': f"{algorithm} - {app}"})
 
@@ -464,7 +464,7 @@ def run_algorithm_tests(algorithm):
 
 @app.route('/run_batch', methods=['POST'])
 def trigger_batch():
-    thread = threading.Thread(target=run_automated_batch, args=("lo0",))
+    thread = threading.Thread(target=run_automated_batch, args=("eth0",))
     thread.start()
     return jsonify({"message": "Automated batch test started."})
 
@@ -531,7 +531,7 @@ def run_all_tests():
         applications = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"]
         packet_count = 50
         timeout = 30
-        interface = "lo0"
+        interface = "eth0"
 
         total = len(algorithms) * len(applications)
         completed = 0
