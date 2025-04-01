@@ -212,7 +212,7 @@ def extract_features_from_db(latest_test):
     ]
     print(f"[DEBUG] Features prepared for prediction (including packet_completion_rate): {len(features)} - {features}")
     return features
-ß
+
 
 ############## TRAFFIC SIMULATION ##############
 def simulate_application_traffic(application):
