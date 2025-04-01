@@ -169,7 +169,8 @@ def extract_features_from_db(latest_test):
         packets_sent = int(latest_test[5])  # Assuming packets_sent is at index 5
         packets_received = int(latest_test[6])  # Assuming packets_received is at index 6
         packet_count_requested = int(latest_test[8])  # Assuming packet_count_requested is at index 8
-        packet_completion_rate = packets_received / max(packet_count_requested, 1) if packet_count_requested > 0 else 0
+        packet_completion_rate = packets_received / max(packets_sent, 1) if packets_sent > 0 else 0
+        print(f"[DEBUG] Calculated packet_completion_rate: {packet_completion_rate}")
     except (TypeError, ValueError):
         packet_completion_rate = 0
 
@@ -211,6 +212,7 @@ def extract_features_from_db(latest_test):
         security_weighting, application_importance, *algorithm_features, *application_features, packet_completion_rate
     ]
     print(f"[DEBUG] Features prepared for prediction (including packet_completion_rate): {len(features)} - {features}")
+    print(f"[DEBUG] Final feature list (length {len(features)}): {features}")
     return features
 
 
@@ -922,6 +924,19 @@ def get_throughput_stats():
 @app.route('/get_recommendation', methods=['GET'])
 def get_recommendation():
     try:
+        # First, check if a previously calculated recommendation exists in the database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT optimal_algorithm FROM pqc_benchmarks ORDER BY timestamp DESC LIMIT 1")
+        result = cursor.fetchone()
+        conn.close()
+
+        if result and result[0]:
+            recommendation = result[0]
+            print(f"[INFO] Retrieved recommendation from database: {recommendation}")
+            return jsonify({"recommendation": f"Recommended algorithm: {recommendation}"})
+
+        # If no previous recommendation exists, calculate it
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM pqc_benchmarks ORDER BY timestamp DESC LIMIT 3")
@@ -945,6 +960,19 @@ def get_recommendation():
         if all_predictions:
             from collections import Counter
             recommendation = Counter(all_predictions).most_common(1)[0][0]
+            print(f"[INFO] Calculated new recommendation: {recommendation}")
+
+            # Store the recommendation in the database
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE pqc_benchmarks 
+                SET optimal_algorithm = ? 
+                WHERE id = (SELECT MAX(id) FROM pqc_benchmarks)
+            """, (recommendation,))
+            conn.commit()
+            conn.close()
+
             return jsonify({"recommendation": f"Recommended algorithm: {recommendation}"})
         else:
             return jsonify({"recommendation": "No recommendation could be made."})
