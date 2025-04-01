@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PQC Benchmark Report</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            background-color: #f4f7fc;
+            color: #333;
+            margin: 0;
+            padding: 0;
+        }
+        header {
+            background-color: #4CAF50;
+            color: white;
+            text-align: center;
+            padding: 20px;
+        }
+        .content {
+            max-width: 900px;
+            margin: 30px auto;
+            padding: 20px;
+            background-color: white;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+        }
+        .table-container {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            margin-bottom: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+        tr:hover {
+            background-color: #f9f9f9;
+        }
+        .back-button {
+            display: inline-block;
+            margin-top: 20px;
+            color: #4CAF50;
+            text-decoration: none;
+            font-weight: bold;
+            border: 2px solid #4CAF50;
+            padding: 10px 20px;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .back-button:hover {
+            background-color: #4CAF50;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h1>PQC Benchmark Report</h1>
+    <h2>Performance Results by Algorithm</h2>
+</header>
+<div class="content">
+    {% set algorithms = data | groupby("algorithm") %}
+    {% for algorithm, results in algorithms %}
+    <div class="table-container">
+        <h3>{{ algorithm }}</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Application</th>
+                    <th>Execution Time (s)</th>
+                    <th>CPU Usage (%)</th>
+                    <th>Memory Usage (MB)</th>
+                    <th>Power Usage</th>
+                    <th>Timestamp</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in results %}
+                <tr>
+                    <td>{{ row["application"] }}</td>
+                    <td>{{ "%.3f" | format(row["execution_time"]) }}</td>
+                    <td>{{ row['cpu_usage'] }}</td>
+                    <td>{{ row['memory_usage'] }}</td>
+                    <td>{{ row["power_usage"] }}</td>
+                    <td>{{ row["timestamp"] }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="table-container">
+        <h3>{{ algorithm }} - Latency Stats</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Application</th>
+                    <th>Average Latency (ms)</th>
+                    <th>Minimum Latency (ms)</th>
+                    <th>Maximum Latency (ms)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for latency in latency_data if latency.algorithm == algorithm %}
+                <tr>
+                    <td>{{ latency.application }}</td>
+                    <td>{{ "%.3f"|format(latency.avg_latency) }}</td>
+                    <td>{{ "%.3f"|format(latency.min_latency) }}</td>
+                    <td>{{ "%.3f"|format(latency.max_latency) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="table-container">
+        <h3>{{ algorithm }} - Packet Loss Stats</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Application</th>
+                    <th>Packets Sent</th>
+                    <th>Packets Successful</th>
+                    <th>Packets Failed</th>
+                    <th>Packet Loss (%)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for loss in packet_loss_data if loss.algorithm == algorithm %}
+                <tr>
+                    <td>{{ loss.application }}</td>
+                    <td>{{ loss.packets_sent | round }}</td>
+                    <td>{{ (loss.packets_successful or 0) | round }}</td>
+                    <td>{{ loss.packets_failed | round }}</td>
+                    <td>{{ ((loss.packet_loss_rate or 0) * 100) | round(2) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="table-container">
+        <h3>{{ algorithm }} - Throughput Stats</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Application</th>
+                    <th>Average Throughput (kbps)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for throughput in throughput_data if throughput.algorithm == algorithm %}
+                <tr>
+                    <td>{{ throughput.application }}</td>
+                    <td>{{ "%.2f"|format(throughput.avg_throughput_kbps or 0) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endfor %}
+    <a href="/" class="back-button">Run Another Test</a>
+</div>
+</body>
+</html>
