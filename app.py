@@ -21,6 +21,7 @@ socketio = SocketIO(app)
 
 model = joblib.load("optimal_algorithm_model_v2.pkl")
 
+NUM_TRIALS = 10 # Define the number of trials per test to improve accuracy
 APPLICATION_TYPES = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"] # Available application types for testing
 ALGORITHM_MAP = {
     "SPHINCS+-128s": "SPHINCS+-SHA2-128s-simple",
@@ -36,58 +37,38 @@ def initialize_database():
     """ Initialize the database and tables for results storage. """
     conn = get_db_connection()
     cursor = conn.cursor()
-
-    # Check if the pqc_benchmarks table exists, create it if not
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS pqc_benchmarks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            algorithm TEXT,
-            application TEXT,
-            execution_time REAL,
-            cpu_usage REAL,
-            memory_usage REAL,
-            power_usage TEXT,
-            timeout INTEGER,
-            packet_count_requested INTEGER,
-            optimal_algorithm TEXT,
-            latency_per_test REAL,
-            avg_throughput_kbps REAL,
-            successful_packets REAL,
-            packet_completion_rate REAL,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.commit()
-
-    # Define columns to be checked/added
-    required_columns = [
-        ("throughput", "REAL"),
-        ("timeout", "INTEGER"),
-        ("packet_count_requested", "INTEGER"),
-        ("optimal_algorithm", "TEXT"),
-        ("latency_per_test", "REAL"),
-        ("avg_throughput_kbps", "REAL"),
-        ("successful_packets", "REAL"),
-        ("packet_completion_rate", "REAL")
-    ]
-
-    # Get existing columns in the pqc_benchmarks table
+    # Check if the 'application' column exists in pqc_benchmarks
     cursor.execute("PRAGMA table_info(pqc_benchmarks)")
-    existing_columns = [column[1] for column in cursor.fetchall()]
+    columns = [column[1] for column in cursor.fetchall()]
+    if "application" not in columns:
+        cursor.execute("ALTER TABLE pqc_benchmarks ADD COLUMN application TEXT")
+    if "throughput" not in columns:
+        cursor.execute("ALTER TABLE pqc_benchmarks ADD COLUMN throughput REAL")
+    if "timeout" not in columns:
+        cursor.execute("ALTER TABLE pqc_benchmarks ADD COLUMN timeout INTEGER")
+    if "packet_count_requested" not in columns:
+        cursor.execute("ALTER TABLE pqc_benchmarks ADD COLUMN packet_count_requested INTEGER")
+    if "optimal_algorithm" not in columns:
+        cursor.execute("ALTER TABLE pqc_benchmarks ADD COLUMN optimal_algorithm TEXT")
+    # Table for benchmarking results
+    cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pqc_benchmarks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                algorithm TEXT,
+                application TEXT,
+                execution_time REAL,
+                cpu_usage REAL,
+                memory_usage REAL,
+                power_usage TEXT,
+                timeout INTEGER,
+                packet_count_requested INTEGER,
+                optimal_algorithm TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
 
-    # Add missing columns if they do not exist
-    for col_name, col_type in required_columns:
-        if col_name not in existing_columns:
-            try:
-                cursor.execute(f"ALTER TABLE pqc_benchmarks ADD COLUMN {col_name} {col_type}")
-                print(f"[INFO] Added column '{col_name}' to pqc_benchmarks.")
-                conn.commit()
-            except sqlite3.OperationalError as e:
-                print(f"[WARNING] Could not add column '{col_name}': {e}")
-
-    # Create other tables if they do not exist
-    table_definitions = {
-        "encrypted_traffic": """
+    # Table for storing encrypted/signed traffic payloads
+    cursor.execute("""
             CREATE TABLE IF NOT EXISTS encrypted_traffic (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 algorithm TEXT,
@@ -96,58 +77,59 @@ def initialize_database():
                 encrypted_size INTEGER,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
-        """,
-        "packet_stats": """
-            CREATE TABLE IF NOT EXISTS packet_stats (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                algorithm TEXT,
-                application TEXT,
-                original_size INTEGER,
-                encrypted_size INTEGER,
-                encryption_time_ms REAL,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """,
-        "packet_latency": """
-            CREATE TABLE IF NOT EXISTS packet_latency (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                algorithm TEXT,
-                application TEXT,
-                encryption_time_ms REAL,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """,
-        "packet_loss_stats": """
-            CREATE TABLE IF NOT EXISTS packet_loss_stats (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                algorithm TEXT,
-                application TEXT,
-                packets_sent INTEGER,
-                packets_received INTEGER,
-                packet_loss_rate REAL,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """,
-        "throughput_stats": """
-            CREATE TABLE IF NOT EXISTS throughput_stats (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                algorithm TEXT,
-                application TEXT,
-                throughput_kbps REAL,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """
-    }
+        """)
 
-    for table_name, table_sql in table_definitions.items():
-        try:
-            cursor.execute(table_sql)
-            conn.commit()
-            print(f"[INFO] Table '{table_name}' ensured to exist.")
-        except sqlite3.OperationalError as e:
-            print(f"[ERROR] Could not create table '{table_name}': {e}")
+    # Table for storing packet stats
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS packet_stats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            algorithm TEXT,
+            application TEXT,
+            original_size INTEGER,
+            encrypted_size INTEGER,
+            encryption_time_ms REAL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
+    # Table for storing per-packet encryption latency
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS packet_latency (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            algorithm TEXT,
+            application TEXT,
+            encryption_time_ms REAL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Table for packet loss stats
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS packet_loss_stats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            algorithm TEXT,
+            application TEXT,
+            packets_sent INTEGER,
+            packets_received INTEGER,
+            packet_loss_rate REAL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Table for throughput stats
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS throughput_stats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            algorithm TEXT,
+            application TEXT,
+            throughput_kbps REAL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    conn.commit()
     conn.close()
+
 
 ############### LOAD AI MODEL ##################
 try:
@@ -163,14 +145,10 @@ def extract_features_from_db(latest_test):
     """
     Extracts the relevant features from the database row to use for prediction.
     """
-    (id, algorithm, application, execution_time, cpu_usage, memory_usage,
-     power_usage, timeout, packet_count_requested, optimal_algorithm) = latest_test[:10]
-    # Handle missing numerical values with suitable defaults
-    execution_time = execution_time if execution_time is not None else 0.0
-    cpu_usage = cpu_usage if cpu_usage is not None else 0.0
-    memory_usage = memory_usage if memory_usage is not None else 0.0
-    timeout = timeout if timeout is not None else 0
-    packet_count_requested = packet_count_requested if packet_count_requested is not None else 0
+    (
+        id, algorithm, application, execution_time, cpu_usage, memory_usage,
+        power_usage, timeout, packet_count_requested, _, optimal_algorithm
+    ) = latest_test[:11]
 
     # Manually calculate additional features
     security_weighting = {
@@ -188,8 +166,9 @@ def extract_features_from_db(latest_test):
 
     # Calculate packet_completion_rate correctly
     try:
-        packets_sent = int(latest_test[5]) if latest_test[5] is not None else 0
-        packets_received = int(latest_test[6]) if latest_test[6] is not None else 0
+        packets_sent = int(latest_test[5])  # Assuming packets_sent is at index 5
+        packets_received = int(latest_test[6])  # Assuming packets_received is at index 6
+        packet_count_requested = int(latest_test[8])  # Assuming packet_count_requested is at index 8
         packet_completion_rate = packets_received / max(packets_sent, 1) if packets_sent > 0 else 0
         print(f"[DEBUG] Calculated packet_completion_rate: {packet_completion_rate}")
     except (TypeError, ValueError):
@@ -208,9 +187,6 @@ def extract_features_from_db(latest_test):
     cpu_efficiency = 0
     throughput_efficiency_kbps = 0
     latency_to_throughput_ratio = 0
-    # Removed timestamp related fields from feature extraction
-    latency_per_test = 0
-    avg_throughput_kbps = 0
 
     # Map algorithm to one-hot encoded features with default 0
     algorithm_features = [
@@ -233,15 +209,9 @@ def extract_features_from_db(latest_test):
         timeout, packet_count_requested, total_successful, packets_failed,
         loss_rate, throughput_kbps, packet_count, power_recorded, memory_recorded,
         successful_packets, cpu_efficiency, throughput_efficiency_kbps, latency_to_throughput_ratio,
-        security_weighting, application_importance, *algorithm_features, *application_features,
-        packet_completion_rate, packet_completion_rate
+        security_weighting, application_importance, *algorithm_features, *application_features, packet_completion_rate
     ]
     print(f"[DEBUG] Features prepared for prediction (including packet_completion_rate): {len(features)} - {features}")
-    # Ensure features list has the required length by padding with 0s if necessary
-    expected_length = 28
-    if len(features) < expected_length:
-        features.extend([0] * (expected_length - len(features)))
-        print(f"[WARNING] Features list was too short. Padded to {expected_length} with 0s.")
     print(f"[DEBUG] Final feature list (length {len(features)}): {features}")
     return features
 
@@ -487,8 +457,6 @@ def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface
     power_recorded = 1 if power_usage != "Not Available" else 0
     memory_recorded = 1 if memory_usage > 0 else 0
 
-    packet_completion_rate = (total_successful / max(total_seen, 1)) if total_seen > 0 else 0
-
     features = [
         execution_time, cpu_usage, memory_usage, power_usage_feature,
         timeout, total_seen, total_successful, packets_failed, loss_rate,
@@ -502,10 +470,8 @@ def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface
         1 if application == "File Transfer" else 0,
         1 if application == "Video Streaming" else 0,
         1 if application == "VoIP" else 0,
-        1 if application == "Web Browsing" else 0,
+        1 if application == "Web Browsing" else 0
     ]
-
-    features = [float(x) if isinstance(x, (int, float)) else 0 for x in features]
 
     # Reshape and predict using the loaded model
     print(f"[DEBUG] Features prepared for prediction: {len(features)} - {features}")
@@ -549,11 +515,8 @@ def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface
             timeout,
             packet_count
         ))
-    conn.commit()
-    conn.close()
-
-    # Store benchmark results in DB
-    store_benchmark_result(algorithm, application, execution_time, cpu_usage, memory_usage, power_usage, timeout, packet_count)
+        conn.commit()
+        conn.close()
 
     # Map the algorithm name correctly
     mapped_algorithm = ALGORITHM_MAP.get(algorithm, algorithm)
@@ -567,9 +530,6 @@ def benchmark_pqc(algorithm, application, packet_count=50, timeout=30, interface
     conn.commit()
     conn.close()
 
-    # Store benchmark results in DB
-    store_benchmark_result(algorithm, application, execution_time, cpu_usage, memory_usage, power_usage, timeout,
-                           packet_count)
     return {
         "avg_execution_time_ms": execution_time,
         "avg_cpu_usage": cpu_usage,
@@ -602,7 +562,7 @@ def run_all_tests():
     return '', 204
 
 
-################ RUN AUTO TESTS ################ ?????????????????/
+################ RUN AUTO TESTS ################
 def run_automated_batch(interface="lo0"):
     algorithms = ["Kyber512", "Dilithium2", "SPHINCS+-SHA2-128s-simple"]
     applications = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"]
@@ -627,24 +587,6 @@ def run_automated_batch(interface="lo0"):
     thread.start()
 
     return "Automated batch testing started."
-
-
-def notify_visualization_update():
-    socketio.emit('visualization_update', {'message': 'New test results available'})
-
-
-def store_benchmark_result(algorithm, application, execution_time, cpu_usage, memory_usage, power_usage, timeout, packet_count):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO pqc_benchmarks (algorithm, application, execution_time, cpu_usage, memory_usage, power_usage, timeout, packet_count_requested)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, (algorithm, application, execution_time, cpu_usage, memory_usage, power_usage, timeout, packet_count))
-    conn.commit()
-    conn.close()
-
-    # Notify frontend about the new data
-    notify_visualization_update()
 
 
 ##########
@@ -709,63 +651,6 @@ def run_algorithm_tests(algorithm):
     return '', 204
 
 
-@app.route('/run_all_algorithms_for_application', methods=['POST'])
-def run_all_algorithms_for_application():
-    from threading import Thread
-    application = request.json.get("application", None)
-
-    if not application:
-        return jsonify({"error": "Application not specified"}), 400
-
-    def run_all_for_application():
-        algorithms = ["Kyber512", "Dilithium2", "SPHINCS+-SHA2-128s-simple"]
-        packet_count = 50
-        timeout = 30
-        interface = "lo0"
-        results = []
-
-        for algo in algorithms:
-            print(f"[NEW TEST] Starting test for {algo} - {application}")
-            benchmark_pqc(algo, application, packet_count, timeout, interface)
-
-            # Get the latest test result from the database and print it
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM pqc_benchmarks WHERE algorithm = ? AND application = ? ORDER BY timestamp DESC LIMIT 1", (algo, application))
-            latest_test = cursor.fetchone()
-            conn.close()
-
-            if latest_test:
-                print(f"[REPORT] Latest test result for {algo} - {application}: {latest_test}")
-                features = extract_features_from_db(latest_test)
-                try:
-                    prediction = model.predict([features])[0]
-                    print(f"[INFO] Predicted optimal algorithm for {algo} - {application}: {prediction}")
-                    results.append((algo, prediction))
-                except Exception as e:
-                    print(f"[ERROR] Model prediction failed for {algo} - {application}: {e}")
-                    results.append((algo, "Prediction Error"))
-
-        # Determine the best algorithm based on predictions
-        if results:
-            best_algorithm = max(results, key=lambda x: x[1] if x[1] != "Prediction Error" else 0)[0]
-            print(f"[INFO] Best algorithm for {application}: {best_algorithm}")
-
-            # Store the recommended algorithm in the database
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE pqc_benchmarks 
-                SET optimal_algorithm = ? 
-                WHERE id = (SELECT MAX(id) FROM pqc_benchmarks WHERE application = ?)
-            """, (best_algorithm, application))
-            conn.commit()
-            conn.close()
-
-        print("[FINAL] Tests and recommendations have been successfully generated.")
-
-    Thread(target=run_all_for_application).start()
-    return jsonify({"message": f"Running all algorithms for the selected application: {application}"}), 200
 @app.route('/run_batch', methods=['POST'])
 def trigger_batch():
     thread = threading.Thread(target=run_automated_batch, args=("lo0",))
@@ -847,30 +732,22 @@ def reset_database():
 
 @app.route('/report') # Defines the Report Page route (Shows Test Results)
 def generate_report():
-    import pandas as pd
     conn = get_db_connection()
-    try:
-        df = pd.read_sql_query("""
-            SELECT 
-                CASE 
-                    WHEN algorithm LIKE 'SPHINCS+%' THEN 'SPHINCS+-128s'
-                    ELSE algorithm 
-                END AS algorithm,
-                application,
-                execution_time,
-                cpu_usage,
-                memory_usage,
-                power_usage,
-                latency_per_test,
-                avg_throughput_kbps,
-                successful_packets,
-                packet_completion_rate
-            FROM pqc_benchmarks
-        """, conn)
-    except Exception as e:
-        print(f"[ERROR] Failed to fetch report data: {e}")
-        import pandas as pd
-        df = pd.DataFrame()
+    df = pd.read_sql_query("""
+        SELECT 
+            CASE 
+                WHEN algorithm LIKE 'SPHINCS+%' THEN 'SPHINCS+-128s'
+                ELSE algorithm 
+            END AS algorithm,
+            application,
+            execution_time,
+            cpu_usage,
+            memory_usage,
+            power_usage,
+            timestamp
+        FROM pqc_benchmarks
+        ORDER BY timestamp DESC
+    """, conn)
     latency_df = pd.read_sql_query("""
         SELECT 
             CASE 
@@ -921,7 +798,7 @@ def generate_report():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT optimal_algorithm FROM pqc_benchmarks ORDER BY id DESC LIMIT 1")
+        cursor.execute("SELECT optimal_algorithm FROM pqc_benchmarks ORDER BY timestamp DESC LIMIT 1")
         result = cursor.fetchone()
         if result and result[0]:
             recommendation = result[0]
@@ -1056,47 +933,114 @@ def get_recommendation():
 
         if result and result[0]:
             recommendation = result[0]
-            message = (f"Recommended algorithm: {recommendation}. Based on recent benchmarks, "
-                       f"{recommendation} has shown optimal performance for the selected application. "
-                       "Refer to the visualizations for more insights.")
-            return jsonify({"recommendation": message})
+            print(f"[INFO] Retrieved recommendation from database: {recommendation}")
+            return jsonify({"recommendation": f"Recommended algorithm: {recommendation}"})
+
+        # If no previous recommendation exists, calculate it
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM pqc_benchmarks ORDER BY timestamp DESC LIMIT 3")
+        latest_tests = cursor.fetchall()
+        conn.close()
+
+        if not latest_tests:
+            return jsonify({"recommendation": "No test results available."})
+
+        # Extract features from the last three tests (one per algorithm)
+        all_predictions = []
+        for test in latest_tests:
+            features = extract_features_from_db(test)
+            try:
+                prediction = model.predict([features])[0]
+                all_predictions.append(prediction)
+            except Exception as e:
+                return jsonify({"error": str(e)})
+
+        # Determine the most frequently recommended algorithm
+        if all_predictions:
+            from collections import Counter
+            recommendation = Counter(all_predictions).most_common(1)[0][0]
+            print(f"[INFO] Calculated new recommendation: {recommendation}")
+
+            # Store the recommendation in the database
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE pqc_benchmarks 
+                SET optimal_algorithm = ? 
+                WHERE id = (SELECT MAX(id) FROM pqc_benchmarks)
+            """, (recommendation,))
+            conn.commit()
+            conn.close()
+
+            return jsonify({"recommendation": f"Recommended algorithm: {recommendation}"})
         else:
-            return jsonify({"recommendation": "No recommendation available."})
+            return jsonify({"recommendation": "No recommendation could be made."})
 
     except Exception as e:
         return jsonify({"error": str(e)})
 
+# New route for testing all algorithms for the selected application
+@app.route('/run_all_algorithms_for_application', methods=['POST'])
+def run_all_algorithms_for_application():
+    from threading import Thread
+    application = request.json.get("application", None)
 
-# New endpoint to provide visualization data for charts
-@app.route('/get_visualization_data')
-def get_visualization_data():
-    conn = get_db_connection()
-    df = pd.read_sql_query("""
-        SELECT algorithm, application, execution_time, cpu_usage, memory_usage, 
-               latency_per_test, avg_throughput_kbps, successful_packets, timestamp
-        FROM pqc_benchmarks
-        ORDER BY timestamp DESC
-    """, conn)
-    conn.close()
+    if not application:
+        return jsonify({"error": "Application not specified"}), 400
 
-    # Prepare data for charts
-    line_chart_data = df.groupby(['timestamp', 'algorithm'])['execution_time'].mean().reset_index().to_dict(orient='records')
-    bar_chart_data = df.groupby(['application', 'algorithm'])['latency_per_test'].mean().reset_index().to_dict(orient='records')
-    scatter_plot_data = df[['latency_per_test', 'avg_throughput_kbps', 'algorithm', 'application']].to_dict(orient='records')
-    radar_chart_data = df.groupby('algorithm')[['cpu_usage', 'memory_usage', 'execution_time']].mean().reset_index().to_dict(orient='records')
-    trend_chart_data = df[['timestamp', 'latency_per_test', 'avg_throughput_kbps']].sort_values('timestamp').to_dict(orient='records')
+    def run_all_for_application():
+        algorithms = ["Kyber512", "Dilithium2", "SPHINCS+-SHA2-128s-simple"]
+        packet_count = 50
+        timeout = 30
+        interface = "lo0"
+        results = []
 
-    return (jsonify({
-        'lineChart': line_chart_data,
-        'barChart': bar_chart_data,
-        'scatterPlot': scatter_plot_data,
-        'radarChart': radar_chart_data,
-        'trendChart': trend_chart_data
-    }))
+        for algo in algorithms:
+            print(f"[NEW TEST] Starting test for {algo} - {application}")
+            benchmark_pqc(algo, application, packet_count, timeout, interface)
 
+            # Get the latest test result from the database and print it
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM pqc_benchmarks ORDER BY timestamp DESC LIMIT 1")
+            latest_test = cursor.fetchone()
+            conn.close()
+
+            if latest_test:
+                print(f"[REPORT] Latest test result for {algo} - {application}: {latest_test}")
+                features = extract_features_from_db(latest_test)
+                try:
+                    prediction = model.predict([features])[0]
+                    print(f"[INFO] Predicted optimal algorithm for {algo} - {application}: {prediction}")
+                    results.append((algo, prediction))
+                except Exception as e:
+                    print(f"[ERROR] Model prediction failed for {algo} - {application}: {e}")
+                    results.append((algo, "Prediction Error"))
+
+        # Determine the best algorithm based on predictions
+        best_algorithm = max(results, key=lambda x: x[1] if x[1] != "Prediction Error" else 0)[0]
+        print(f"[INFO] Best algorithm for {application}: {best_algorithm}")
+
+        # Store the recommended algorithm in the database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE pqc_benchmarks 
+            SET optimal_algorithm = ? 
+            WHERE id = (SELECT MAX(id) FROM pqc_benchmarks WHERE application = ?)
+        """, (best_algorithm, application))
+        conn.commit()
+        conn.close()
+
+        print("[FINAL] Tests and recommendations have been successfully generated.")
+
+    Thread(target=run_all_for_application).start()
+    return jsonify({"message": f"Running all algorithms for the selected application: {application}"}), 200
 
 # Initialize Database Before Running
 initialize_database()
+
 
 # Run Flask App
 if __name__ == '__main__':

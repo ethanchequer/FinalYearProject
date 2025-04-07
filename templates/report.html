@@ -83,45 +83,40 @@
 <div class="content">
     <div class="results-container">
         <div class="results-table">
-            <h3>Results</h3>
-            <table>
+            <h3>Latest Test Results</h3>
+            <table id="results-table">
                 <thead>
                     <tr>
                         <th>Algorithm</th>
                         <th>Application</th>
-                        <th>Execution Time</th>
-                        <th>CPU Usage</th>
-                        <th>Memory Usage</th>
-                        <th>Latency per Test</th>
-                        <th>Avg Throughput (kbps)</th>
-                        <th>Successful Packets</th>
-                        <th>Packet Completion Rate</th>
+                        <th>Execution Time (s)</th>
+                        <th>CPU Usage (%)</th>
+                        <th>Memory Usage (MB)</th>
+                        <th>Power Usage</th>
+                        <th>Timestamp</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% for row in results %}
+                    {% for row in data %}
                     <tr>
                         <td>{{ row["algorithm"] }}</td>
                         <td>{{ row["application"] }}</td>
-                        <td>{{ row["execution_time"] }}</td>
-                        <td>{{ row["cpu_usage"] }}</td>
-                        <td>{{ row["memory_usage"] }}</td>
-                        <td>{{ row["latency_per_test"] }}</td>
-                        <td>{{ row["avg_throughput_kbps"] }}</td>
-                        <td>{{ row["successful_packets"] }}</td>
-                        <td>{{ row["packet_completion_rate"] }}</td>
+                        <td>{{ "%.3f" | format(row["execution_time"]) }}</td>
+                        <td>{{ row['cpu_usage'] }}</td>
+                        <td>{{ row['memory_usage'] }}</td>
+                        <td>{{ row["power_usage"] }}</td>
+                        <td>{{ row["timestamp"] }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
+            <button onclick="fetchRecommendation()" class="recommendation-btn">Get Recommendation</button>
+            <div id="recommendation-output" class="recommendation-box">Recommendation will appear here</div>
         </div>
         <div class="visualizations">
             <h3>Performance Visualizations</h3>
             <canvas id="lineChart"></canvas>
             <canvas id="barChart"></canvas>
-            <canvas id="scatterPlot"></canvas>
-            <canvas id="radarChart"></canvas>
-            <canvas id="trendChart"></canvas>
         </div>
     </div>
     <a href="/" class="back-button">Run Another Test</a>
@@ -138,35 +133,6 @@
                 document.getElementById("recommendation-output").innerText = "Error: " + error;
             });
     }
-
-    function generateChart(canvasId, type, data, options) {
-        const ctx = document.getElementById(canvasId).getContext('2d');
-        return new Chart(ctx, {
-            type: type,
-            data: data,
-            options: options
-        });
-    }
-
-    fetch('/get_visualization_data')
-        .then(response => response.json())
-        .then(data => {
-            // Line Chart: Performance over time
-            generateChart('lineChart', 'line', data.lineChart, {responsive: true});
-
-            // Bar Chart: Comparison of algorithms by application
-            generateChart('barChart', 'bar', data.barChart, {responsive: true});
-
-            // Scatter Plot: Latency vs. Throughput
-            generateChart('scatterPlot', 'scatter', data.scatterPlot, {responsive: true});
-
-            // Radar Chart: Resource usage (CPU, Memory, Power) per algorithm
-            generateChart('radarChart', 'radar', data.radarChart, {responsive: true});
-
-            // Trend Chart: Performance trend over time
-            generateChart('trendChart', 'line', data.trendChart, {responsive: true});
-        })
-        .catch(error => console.error('Error fetching visualization data:', error));
 </script>
 </body>
 </html>
