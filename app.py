@@ -1038,6 +1038,69 @@ def run_all_algorithms_for_application():
     Thread(target=run_all_for_application).start()
     return jsonify({"message": f"Running all algorithms for the selected application: {application}"}), 200
 
+
+@app.route('/get_visualization_data')
+def get_visualization_data():
+    conn = get_db_connection()
+    df = pd.read_sql_query("""
+        SELECT algorithm, application, execution_time, cpu_usage, memory_usage, power_usage, timestamp
+        FROM pqc_benchmarks
+        ORDER BY timestamp DESC
+    """, conn)
+    conn.close()
+
+    # Prepare data for charts
+    line_chart_data = {
+        "labels": df["timestamp"].tolist(),
+        "datasets": [{
+            "label": "Execution Time (s)",
+            "data": df["execution_time"].tolist()
+        }]
+    }
+
+    bar_chart_data = {
+        "labels": df["application"].tolist(),
+        "datasets": [{
+            "label": "CPU Usage (%)",
+            "data": df["cpu_usage"].tolist()
+        }]
+    }
+
+    scatter_plot_data = {
+        "datasets": [{
+            "label": "Latency vs Throughput",
+            "data": [{"x": row["execution_time"], "y": row["cpu_usage"]} for _, row in df.iterrows()]
+        }]
+    }
+
+    radar_chart_data = {
+        "labels": ["CPU Usage", "Memory Usage", "Power Usage"],
+        "datasets": [{
+            "label": "Resource Usage",
+            "data": [
+                df["cpu_usage"].mean(),
+                df["memory_usage"].mean(),
+                df["power_usage"].replace("Not Available", 0).astype(float).mean()
+            ]
+        }]
+    }
+
+    trend_chart_data = {
+        "labels": df["timestamp"].tolist(),
+        "datasets": [{
+            "label": "Throughput (kbps)",
+            "data": df["execution_time"].tolist()
+        }]
+    }
+
+    return jsonify({
+        "lineChart": line_chart_data,
+        "barChart": bar_chart_data,
+        "scatterPlot": scatter_plot_data,
+        "radarChart": radar_chart_data,
+        "trendChart": trend_chart_data
+    })
+
 # Initialize Database Before Running
 initialize_database()
 
