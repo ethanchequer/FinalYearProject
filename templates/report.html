@@ -113,40 +113,14 @@
             <button onclick="fetchRecommendation()" class="recommendation-btn">Get Recommendation</button>
             <div id="recommendation-output" class="recommendation-box">Recommendation will appear here</div>
         </div>
-        <div class="visualizations">
+        <div class="visualizations" id="chart-container">
             <h3>Performance Visualizations</h3>
-            <div id="chart-container"></div>
         </div>
     </div>
     <a href="/" class="back-button">Run Another Test</a>
 </div>
 
 <script>
-    document.addEventListener("DOMContentLoaded", function() {
-        console.log("Report page loaded. Fetching visualization data...");
-        fetch('/get_visualization_data')
-            .then(response => response.json())
-            .then(data => {
-                console.log("Fetched visualization data:", data);
-                for (const [app, charts] of Object.entries(data)) {
-                    for (const [chartId, chartData] of Object.entries(charts)) {
-                        addCanvasToContainer("chart-container", chartId);
-                        generateChart(chartId, chartData.type, chartData, { responsive: true });
-                    }
-                }
-            })
-            .catch(error => console.error('Error fetching visualization data:', error));
-    });
-
-    function addCanvasToContainer(containerId, canvasId) {
-        const container = document.getElementById(containerId);
-        const canvas = document.createElement("canvas");
-        canvas.id = canvasId;
-        canvas.style.marginTop = "15px";
-        canvas.style.borderRadius = "5px";
-        container.appendChild(canvas);
-    }
-
     function fetchRecommendation() {
         fetch('/get_recommendation')
             .then(response => response.json())
@@ -159,18 +133,37 @@
     }
 
     function generateChart(canvasId, type, data, options) {
-        const canvas = document.getElementById(canvasId);
-        if (!canvas) {
-            console.warn(`Canvas with ID ${canvasId} not found.`);
-            return;
-        }
-        const ctx = canvas.getContext('2d');
+        const ctx = document.getElementById(canvasId).getContext('2d');
         return new Chart(ctx, {
             type: type,
             data: data,
             options: options
         });
     }
+
+    function addCanvasToContainer(containerId, canvasId) {
+        const container = document.getElementById(containerId);
+        const canvas = document.createElement("canvas");
+        canvas.id = canvasId;
+        canvas.style.marginTop = "15px";
+        canvas.style.borderRadius = "5px";
+        container.appendChild(canvas);
+    }
+
+    fetch('/get_visualization_data')
+        .then(response => response.json())
+        .then(data => {
+            console.log("Visualization data received:", data);
+            const container = document.querySelector(".visualizations");
+
+            for (const [app, chartData] of Object.entries(data)) {
+                const canvasId = app.replace(/\s+/g, '') + "Chart";
+                addCanvasToContainer("chart-container", canvasId);
+                console.log(`[DEBUG] Creating chart for application: ${app} with ID: ${canvasId}`);
+                generateChart(canvasId, 'bar', chartData, { responsive: true });
+            }
+        })
+        .catch(error => console.error('Error fetching visualization data:', error));
 </script>
 </body>
 </html>

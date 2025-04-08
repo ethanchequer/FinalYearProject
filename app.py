@@ -1043,66 +1043,44 @@ def run_all_algorithms_for_application():
 def get_visualization_data():
     conn = get_db_connection()
     df = pd.read_sql_query("""
-        SELECT algorithm, application,
-               AVG(execution_time) AS avg_execution_time, 
-               AVG(cpu_usage) AS avg_cpu_usage, 
-               AVG(memory_usage) AS avg_memory_usage, 
-               AVG(CAST(power_usage AS REAL)) AS avg_power_usage, 
-               AVG(throughput) AS avg_throughput
+        SELECT algorithm, application, execution_time, cpu_usage, memory_usage, power_usage, timestamp
         FROM pqc_benchmarks
-        GROUP BY algorithm, application
+        ORDER BY timestamp DESC
     """, conn)
     conn.close()
 
-    applications = list(df["application"].dropna().unique())
+    applications = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"]
     visualizations = {}
 
-    for application in applications:
-        app_df = df[df["application"] == application]
+    for app in applications:
+        app_df = df[df["application"] == app]
         if app_df.empty:
             continue
 
-        visualizations[application] = {
-            "barChart": {
-                "labels": app_df["algorithm"].tolist(),
-                "datasets": [{
-                    "label": f"Avg CPU Usage for {application} (%)",
-                    "data": app_df["avg_cpu_usage"].fillna(0).tolist()
-                }]
-            },
-            "lineChart": {
-                "labels": app_df["algorithm"].tolist(),
-                "datasets": [{
-                    "label": f"Avg Execution Time for {application} (s)",
-                    "data": app_df["avg_execution_time"].fillna(0).tolist()
-                }]
-            },
-            "radarChart": {
-                "labels": ["CPU Usage", "Memory Usage", "Power Usage"],
-                "datasets": [{
-                    "label": f"Resource Usage for {application}",
-                    "data": [
-                        app_df["avg_cpu_usage"].fillna(0).mean() if not app_df["avg_cpu_usage"].empty else 0,
-                        app_df["avg_memory_usage"].fillna(0).mean() if not app_df["avg_memory_usage"].empty else 0,
-                        app_df["avg_power_usage"].fillna(0).mean() if not app_df["avg_power_usage"].empty else 0
-                    ]
-                }]
-            },
-            "trendChart": {
-                "labels": app_df["algorithm"].tolist(),
-                "datasets": [{
-                    "label": f"Avg Throughput for {application} (kbps)",
-                    "data": app_df["avg_throughput"].fillna(0).tolist()
-                }]
-            }
-        }
+        print(f"[DEBUG] Preparing bar chart for application: {app}")
 
-    print("[DEBUG] Visualization Data Frame:")
-    print(df)
-    print("[DEBUG] Applications extracted:")
-    print(applications)
-    print("[DEBUG] Generated Visualization Dictionary:")
-    print(visualizations)
+        # Group by algorithm and calculate averages on numeric columns only
+        numeric_columns = app_df.select_dtypes(include=["number"]).columns
+        print(f"[DEBUG] Numeric columns for averaging: {list(numeric_columns)}")
+        grouped = app_df.groupby("algorithm")[numeric_columns].mean().reset_index()
+        print(f"[DEBUG] Grouped data for {app}: {grouped[['algorithm', 'cpu_usage', 'execution_time']].to_dict(orient='records')}")
+
+        bar_chart_data = {
+            "labels": grouped["algorithm"].tolist(),
+            "datasets": [{
+                "label": f"CPU Usage (%) for {app}",
+                "data": grouped["cpu_usage"].tolist()
+            }, {
+                "label": f"Execution Time (s) for {app}",
+                "data": grouped["execution_time"].tolist()
+            }]
+        }
+        print(f"[DEBUG] Bar chart labels for {app}: {bar_chart_data['labels']}")
+        print(f"[DEBUG] CPU Usage data for {app}: {bar_chart_data['datasets'][0]['data']}")
+        print(f"[DEBUG] Execution Time data for {app}: {bar_chart_data['datasets'][1]['data']}")
+
+        visualizations[app] = bar_chart_data
+
     return jsonify(visualizations)
 
 # Initialize Database Before Running
