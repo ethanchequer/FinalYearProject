@@ -151,19 +151,23 @@
     }
 
     fetch('/get_visualization_data')
-        .then(response => response.json())
-        .then(data => {
-            console.log("Visualization data received:", data);
-            const container = document.querySelector(".visualizations");
+    .then(response => response.json())
+    .then(data => {
+        console.log("Visualization data received:", data);
+        const container = document.querySelector(".visualizations");
 
-            for (const [app, chartData] of Object.entries(data)) {
-                const canvasId = app.replace(/\s+/g, '') + "Chart";
-                addCanvasToContainer("chart-container", canvasId);
-                console.log(`[DEBUG] Creating chart for application: ${app} with ID: ${canvasId}`);
-                generateChart(canvasId, 'bar', chartData, { responsive: true });
-            }
-        })
-        .catch(error => console.error('Error fetching visualization data:', error));
+        for (const [chartId, chartData] of Object.entries(data)) {
+            const canvasId = chartId.replace(/\s+/g, '') + "Chart";
+            addCanvasToContainer("chart-container", canvasId);
+
+            // Determine chart type based on data structure
+            const chartType = (chartData.labels && chartData.labels.includes("CPU Usage (%)")) ? 'radar' : 'bar';
+            console.log(`[DEBUG] Creating chart for: ${chartId} with ID: ${canvasId} and Type: ${chartType}`);
+
+            generateChart(canvasId, chartType, chartData, { responsive: true });
+        }
+    })
+    .catch(error => console.error('Error fetching visualization data:', error));
 </script>
 </body>
 </html>

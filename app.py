@@ -1057,29 +1057,42 @@ def get_visualization_data():
         if app_df.empty:
             continue
 
-        print(f"[DEBUG] Preparing bar chart for application: {app}")
+        print(f"[DEBUG] Preparing execution time bar chart for application: {app}")
 
         # Group by algorithm and calculate averages on numeric columns only
         numeric_columns = app_df.select_dtypes(include=["number"]).columns
-        print(f"[DEBUG] Numeric columns for averaging: {list(numeric_columns)}")
         grouped = app_df.groupby("algorithm")[numeric_columns].mean().reset_index()
-        print(f"[DEBUG] Grouped data for {app}: {grouped[['algorithm', 'cpu_usage', 'execution_time']].to_dict(orient='records')}")
 
+        # Execution Time Bar Chart
         bar_chart_data = {
             "labels": grouped["algorithm"].tolist(),
             "datasets": [{
-                "label": f"CPU Usage (%) for {app}",
-                "data": grouped["cpu_usage"].tolist()
-            }, {
                 "label": f"Execution Time (s) for {app}",
                 "data": grouped["execution_time"].tolist()
             }]
         }
-        print(f"[DEBUG] Bar chart labels for {app}: {bar_chart_data['labels']}")
-        print(f"[DEBUG] CPU Usage data for {app}: {bar_chart_data['datasets'][0]['data']}")
-        print(f"[DEBUG] Execution Time data for {app}: {bar_chart_data['datasets'][1]['data']}")
+        print(f"[DEBUG] Execution Time data for {app}: {bar_chart_data['datasets'][0]['data']}")
+        visualizations[f"{app}_execution"] = bar_chart_data
 
-        visualizations[app] = bar_chart_data
+    # Prepare the radar chart for resource usage
+    radar_chart_data = {
+        "labels": ["CPU Usage (%)", "Memory Usage (MB)", "Power Usage (W)"],
+        "datasets": []
+    }
+
+    algorithms = df["algorithm"].unique().tolist()
+    for alg in algorithms:
+        alg_df = df[df["algorithm"] == alg]
+        avg_cpu = alg_df["cpu_usage"].mean()
+        avg_memory = alg_df["memory_usage"].mean()
+        avg_power = pd.to_numeric(alg_df["power_usage"].replace("Not Available", 0), errors='coerce').mean()
+        radar_chart_data["datasets"].append({
+            "label": alg,
+            "data": [avg_cpu, avg_memory, avg_power]
+        })
+
+    print(f"[DEBUG] Radar Chart data: {radar_chart_data}")
+    visualizations["resource_usage"] = radar_chart_data
 
     return jsonify(visualizations)
 
