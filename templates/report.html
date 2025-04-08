@@ -155,6 +155,8 @@
         </div>
         <div class="visualizations" id="chart-container">
             <h3>Performance Visualizations</h3>
+            <div id="resource-chart"></div>
+            <div id="performance-chart"></div>
         </div>
     </div>
     <a href="/" class="back-button">Run Another Test</a>
@@ -177,50 +179,7 @@
         return new Chart(ctx, {
             type: type,
             data: data,
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: {
-                        display: true,
-                        labels: {
-                            color: 'white',
-                            font: {
-                                size: 14
-                            }
-                        }
-                    },
-                    title: {
-                        display: true,
-                        text: type === 'radar' ? 'Resource and Performance Metrics' : 'Execution Time (s)',
-                        color: '#ffcc00',
-                        font: {
-                            size: 18
-                        }
-                    }
-                },
-                scales: type === 'radar' ? {
-                    r: {
-                        angleLines: {
-                            color: '#555',
-                            lineWidth: 2
-                        },
-                        grid: {
-                            color: '#777',
-                            lineWidth: 1
-                        },
-                        pointLabels: {
-                            color: 'white',
-                            font: {
-                                size: 14
-                            }
-                        },
-                        ticks: {
-                            backdropColor: '#1b1b2f',
-                            color: 'white'
-                        }
-                    }
-                } : {}
-            }
+            options: options
         });
     }
 
@@ -244,24 +203,70 @@
                 addCanvasToContainer("chart-container", canvasId);
 
                 // Determine chart type based on data structure
-                const chartType = chartId.includes("resource_usage") ? 'radar' : 'bar';
+                let chartType;
+                let chartTitle;
+                if (chartId.includes("resource_usage_radar")) {
+                    chartType = 'radar';
+                    chartTitle = 'Resource Usage Metrics';
+                } else if (chartId.includes("performance_metrics_radar")) {
+                    chartType = 'radar';
+                    chartTitle = 'Performance Metrics';
+                } else {
+                    chartType = 'bar';
+                    chartTitle = "Execution Time (s)";
+                }
+
                 console.log(`[DEBUG] Creating chart for: ${chartId} with ID: ${canvasId} and Type: ${chartType}`);
 
-                // Custom options for the combined execution time chart
-                const options = chartType === 'bar' && chartId.includes("combined_execution") ? {
+                // Custom options for radar charts
+                const radarOptions = {
                     responsive: true,
                     plugins: {
-                        legend: { display: true },
+                        legend: {
+                            display: true,
+                            labels: {
+                                color: 'white',
+                                font: {
+                                    size: 14
+                                }
+                            }
+                        },
                         title: {
                             display: true,
-                            text: "Combined Execution Time for All Algorithms and Applications"
+                            text: chartTitle,
+                            color: '#ffcc00',
+                            font: {
+                                size: 18
+                            }
                         }
                     },
                     scales: {
-                        x: { title: { display: true, text: "Algorithm - Application" } },
-                        y: { title: { display: true, text: "Execution Time (s)" } }
+                        r: {
+                            angleLines: {
+                                color: '#555',
+                                lineWidth: 2
+                            },
+                            grid: {
+                                color: '#777',
+                                lineWidth: 1
+                            },
+                            pointLabels: {
+                                color: 'white',
+                                font: {
+                                    size: 14
+                                }
+                            },
+                            ticks: {
+                                backdropColor: '#1b1b2f',
+                                color: 'white',
+                                beginAtZero: true,
+                                max: 100
+                            }
+                        }
                     }
-                } : { responsive: true };
+                };
+
+                const options = chartType === 'radar' ? radarOptions : { responsive: true };
 
                 generateChart(canvasId, chartType, chartData, options);
             }

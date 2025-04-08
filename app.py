@@ -1082,9 +1082,45 @@ def get_visualization_data():
     }
     visualizations["combined_execution"] = combined_chart_data
 
-    # Prepare the radar chart for resource usage with additional metrics
-    radar_chart_data = {
-        "labels": ["CPU Usage (%)", "Memory Usage (MB)", "Power Usage (W)", "Latency (ms)", "Throughput (kbps)", "Execution Time (s)", "Packet Loss (%)"],
+
+    # Normalization ranges for each metric
+    MAX_VALUES = {
+        "cpu_usage": 100,
+        "memory_usage": 20,
+        "power_usage": 10,
+        "latency": 100,
+        "throughput": 1000,
+        "execution_time": 30,
+        "packet_loss": 100
+    }
+
+    # Normalization ranges for each metric group
+    RESOURCE_MAX_VALUES = {
+        "cpu_usage": 100,
+        "memory_usage": 20,
+        "power_usage": 20
+    }
+
+    PERFORMANCE_MAX_VALUES = {
+        "latency": 1000,
+        "throughput": 1000,
+        "execution_time": 30,
+        "packet_loss": 100
+    }
+
+    # Normalize a metric value based on its maximum range
+    def normalize(value, max_value):
+        return (value / max_value) * 100 if max_value else 0
+
+    # Prepare the radar chart for Resource Usage Metrics
+    resource_radar_data = {
+        "labels": ["CPU Usage (%)", "Memory Usage (MB)", "Power Usage (W)"],
+        "datasets": []
+    }
+
+    # Prepare the radar chart for Performance Metrics
+    performance_radar_data = {
+        "labels": ["Latency (ms)", "Throughput (kbps)", "Execution Time (s)", "Packet Loss (%)"],
         "datasets": []
     }
 
@@ -1092,24 +1128,40 @@ def get_visualization_data():
     conn2 = get_db_connection()
     for alg in algorithms:
         alg_df = df[df["algorithm"] == alg]
-        avg_cpu = alg_df["cpu_usage"].mean()
-        avg_memory = alg_df["memory_usage"].mean()
-        avg_power = pd.to_numeric(alg_df["power_usage"].replace("Not Available", 0), errors='coerce').mean()
+
+        # Resource Metrics
+        avg_cpu = normalize(alg_df["cpu_usage"].mean(), RESOURCE_MAX_VALUES["cpu_usage"])
+        avg_memory = normalize(alg_df["memory_usage"].mean(), RESOURCE_MAX_VALUES["memory_usage"])
+        avg_power = normalize(pd.to_numeric(alg_df["power_usage"].replace("Not Available", 0), errors='coerce').mean(), RESOURCE_MAX_VALUES["power_usage"])
+
+        # Performance Metrics
         latency_query = pd.read_sql_query("SELECT AVG(encryption_time_ms) FROM packet_latency WHERE algorithm = ?", conn2, params=[alg])
-        avg_latency = latency_query.iloc[0, 0] or 0
+        avg_latency = normalize(latency_query.iloc[0, 0] or 0, PERFORMANCE_MAX_VALUES["latency"])
         throughput_query = pd.read_sql_query("SELECT AVG(throughput_kbps) FROM throughput_stats WHERE algorithm = ?", conn2, params=[alg])
-        avg_throughput = throughput_query.iloc[0, 0] or 0
-        avg_execution_time = alg_df["execution_time"].mean()
+        avg_throughput = normalize(throughput_query.iloc[0, 0] or 0, PERFORMANCE_MAX_VALUES["throughput"])
+        avg_execution_time = normalize(alg_df["execution_time"].mean(), PERFORMANCE_MAX_VALUES["execution_time"])
         packet_loss_query = pd.read_sql_query("SELECT AVG(packet_loss_rate) FROM packet_loss_stats WHERE algorithm = ?", conn2, params=[alg])
-        avg_packet_loss = packet_loss_query.iloc[0, 0] or 0
-        radar_chart_data["datasets"].append({
+        avg_packet_loss = normalize(packet_loss_query.iloc[0, 0] or 0, PERFORMANCE_MAX_VALUES["packet_loss"])
+
+        # Append to Resource Usage Radar Chart
+        resource_radar_data["datasets"].append({
             "label": alg,
-            "data": [avg_cpu, avg_memory, avg_power, avg_latency, avg_throughput, avg_execution_time, avg_packet_loss]
+            "data": [avg_cpu, avg_memory, avg_power]
+        })
+
+        # Append to Performance Metrics Radar Chart
+        performance_radar_data["datasets"].append({
+            "label": alg,
+            "data": [avg_latency, avg_throughput, avg_execution_time, avg_packet_loss]
         })
     conn2.close()
 
-    print(f"[DEBUG] Radar Chart data: {radar_chart_data}")
-    visualizations["resource_usage"] = radar_chart_data
+    # Store the radar chart data separately
+    visualizations["resource_usage_radar"] = resource_radar_data
+    visualizations["performance_metrics_radar"] = performance_radar_data
+
+    print(f"[DEBUG] Resource Usage Radar Data: {resource_radar_data}")
+    print(f"[DEBUG] Performance Metrics Radar Data: {performance_radar_data}")
 
     return jsonify(visualizations)
 
