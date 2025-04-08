@@ -1049,30 +1049,38 @@ def get_visualization_data():
     """, conn)
     conn.close()
 
-    applications = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"]
     visualizations = {}
 
-    for app in applications:
-        app_df = df[df["application"] == app]
-        if app_df.empty:
-            continue
+    # Combined Execution Time Bar Chart (Grouped by Application)
+    numeric_columns = df.select_dtypes(include=["number"]).columns
+    print(f"[DEBUG] Numeric columns for averaging: {list(numeric_columns)}")
+    combined_df = df.groupby(["application", "algorithm"])[numeric_columns].mean().reset_index()
+    applications = combined_df["application"].unique()
+    colors = {
+        "SPHINCS+-SHA2-128s-simple": "rgba(54, 162, 235, 0.6)",
+        "Dilithium2": "rgba(255, 99, 132, 0.6)",
+        "Kyber512": "rgba(255, 205, 86, 0.6)"
+    }
+    datasets = []
 
-        print(f"[DEBUG] Preparing execution time bar chart for application: {app}")
+    for alg in combined_df["algorithm"].unique():
+        data = []
+        for app in applications:
+            # Get the average execution time for the current algorithm and application
+            value = combined_df.loc[(combined_df["algorithm"] == alg) & (combined_df["application"] == app), "execution_time"]
+            data.append(value.iloc[0] if not value.empty else 0)
 
-        # Group by algorithm and calculate averages on numeric columns only
-        numeric_columns = app_df.select_dtypes(include=["number"]).columns
-        grouped = app_df.groupby("algorithm")[numeric_columns].mean().reset_index()
+        datasets.append({
+            "label": alg,
+            "backgroundColor": colors.get(alg, "rgba(75, 192, 192, 0.6)"),
+            "data": data
+        })
 
-        # Execution Time Bar Chart
-        bar_chart_data = {
-            "labels": grouped["algorithm"].tolist(),
-            "datasets": [{
-                "label": f"Execution Time (s) for {app}",
-                "data": grouped["execution_time"].tolist()
-            }]
-        }
-        print(f"[DEBUG] Execution Time data for {app}: {bar_chart_data['datasets'][0]['data']}")
-        visualizations[f"{app}_execution"] = bar_chart_data
+    combined_chart_data = {
+        "labels": list(applications),
+        "datasets": datasets
+    }
+    visualizations["combined_execution"] = combined_chart_data
 
     # Prepare the radar chart for resource usage
     radar_chart_data = {

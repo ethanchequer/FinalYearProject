@@ -151,23 +151,39 @@
     }
 
     fetch('/get_visualization_data')
-    .then(response => response.json())
-    .then(data => {
-        console.log("Visualization data received:", data);
-        const container = document.querySelector(".visualizations");
+        .then(response => response.json())
+        .then(data => {
+            console.log("Visualization data received:", data);
+            const container = document.querySelector(".visualizations");
 
-        for (const [chartId, chartData] of Object.entries(data)) {
-            const canvasId = chartId.replace(/\s+/g, '') + "Chart";
-            addCanvasToContainer("chart-container", canvasId);
+            for (const [chartId, chartData] of Object.entries(data)) {
+                const canvasId = chartId.replace(/\s+/g, '') + "Chart";
+                addCanvasToContainer("chart-container", canvasId);
 
-            // Determine chart type based on data structure
-            const chartType = (chartData.labels && chartData.labels.includes("CPU Usage (%)")) ? 'radar' : 'bar';
-            console.log(`[DEBUG] Creating chart for: ${chartId} with ID: ${canvasId} and Type: ${chartType}`);
+                // Determine chart type based on data structure
+                const chartType = chartId.includes("resource_usage") ? 'radar' : 'bar';
+                console.log(`[DEBUG] Creating chart for: ${chartId} with ID: ${canvasId} and Type: ${chartType}`);
 
-            generateChart(canvasId, chartType, chartData, { responsive: true });
-        }
-    })
-    .catch(error => console.error('Error fetching visualization data:', error));
+                // Custom options for the combined execution time chart
+                const options = chartType === 'bar' && chartId.includes("combined_execution") ? {
+                    responsive: true,
+                    plugins: {
+                        legend: { display: true },
+                        title: {
+                            display: true,
+                            text: "Combined Execution Time for All Algorithms and Applications"
+                        }
+                    },
+                    scales: {
+                        x: { title: { display: true, text: "Algorithm - Application" } },
+                        y: { title: { display: true, text: "Execution Time (s)" } }
+                    }
+                } : { responsive: true };
+
+                generateChart(canvasId, chartType, chartData, options);
+            }
+        })
+        .catch(error => console.error('Error fetching visualization data:', error));
 </script>
 </body>
 </html>
