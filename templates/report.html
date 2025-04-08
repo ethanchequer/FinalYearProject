@@ -115,17 +115,38 @@
         </div>
         <div class="visualizations">
             <h3>Performance Visualizations</h3>
-            <canvas id="lineChart"></canvas>
-            <canvas id="barChart"></canvas>
-            <canvas id="scatterPlot"></canvas>
-            <canvas id="radarChart"></canvas>
-            <canvas id="trendChart"></canvas>
+            <div id="chart-container"></div>
         </div>
     </div>
     <a href="/" class="back-button">Run Another Test</a>
 </div>
 
 <script>
+    document.addEventListener("DOMContentLoaded", function() {
+        console.log("Report page loaded. Fetching visualization data...");
+        fetch('/get_visualization_data')
+            .then(response => response.json())
+            .then(data => {
+                console.log("Fetched visualization data:", data);
+                for (const [app, charts] of Object.entries(data)) {
+                    for (const [chartId, chartData] of Object.entries(charts)) {
+                        addCanvasToContainer("chart-container", chartId);
+                        generateChart(chartId, chartData.type, chartData, { responsive: true });
+                    }
+                }
+            })
+            .catch(error => console.error('Error fetching visualization data:', error));
+    });
+
+    function addCanvasToContainer(containerId, canvasId) {
+        const container = document.getElementById(containerId);
+        const canvas = document.createElement("canvas");
+        canvas.id = canvasId;
+        canvas.style.marginTop = "15px";
+        canvas.style.borderRadius = "5px";
+        container.appendChild(canvas);
+    }
+
     function fetchRecommendation() {
         fetch('/get_recommendation')
             .then(response => response.json())
@@ -138,24 +159,18 @@
     }
 
     function generateChart(canvasId, type, data, options) {
-        const ctx = document.getElementById(canvasId).getContext('2d');
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) {
+            console.warn(`Canvas with ID ${canvasId} not found.`);
+            return;
+        }
+        const ctx = canvas.getContext('2d');
         return new Chart(ctx, {
             type: type,
             data: data,
             options: options
         });
     }
-
-    fetch('/get_visualization_data')
-        .then(response => response.json())
-        .then(data => {
-            generateChart('lineChart', 'line', data.lineChart, { responsive: true });
-            generateChart('barChart', 'bar', data.barChart, { responsive: true });
-            generateChart('scatterPlot', 'scatter', data.scatterPlot, { responsive: true });
-            generateChart('radarChart', 'radar', data.radarChart, { responsive: true });
-            generateChart('trendChart', 'line', data.trendChart, { responsive: true });
-        })
-        .catch(error => console.error('Error fetching visualization data:', error));
 </script>
 </body>
 </html>

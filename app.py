@@ -1043,63 +1043,67 @@ def run_all_algorithms_for_application():
 def get_visualization_data():
     conn = get_db_connection()
     df = pd.read_sql_query("""
-        SELECT algorithm, application, execution_time, cpu_usage, memory_usage, power_usage, timestamp
+        SELECT algorithm, application,
+               AVG(execution_time) AS avg_execution_time, 
+               AVG(cpu_usage) AS avg_cpu_usage, 
+               AVG(memory_usage) AS avg_memory_usage, 
+               AVG(CAST(power_usage AS REAL)) AS avg_power_usage, 
+               AVG(throughput) AS avg_throughput
         FROM pqc_benchmarks
-        ORDER BY timestamp DESC
+        GROUP BY algorithm, application
     """, conn)
     conn.close()
 
-    # Prepare data for charts
-    line_chart_data = {
-        "labels": df["timestamp"].tolist(),
-        "datasets": [{
-            "label": "Execution Time (s)",
-            "data": df["execution_time"].tolist()
-        }]
-    }
+    applications = list(df["application"].dropna().unique())
+    visualizations = {}
 
-    bar_chart_data = {
-        "labels": df["application"].tolist(),
-        "datasets": [{
-            "label": "CPU Usage (%)",
-            "data": df["cpu_usage"].tolist()
-        }]
-    }
+    for application in applications:
+        app_df = df[df["application"] == application]
+        if app_df.empty:
+            continue
 
-    scatter_plot_data = {
-        "datasets": [{
-            "label": "Latency vs Throughput",
-            "data": [{"x": row["execution_time"], "y": row["cpu_usage"]} for _, row in df.iterrows()]
-        }]
-    }
+        visualizations[application] = {
+            "barChart": {
+                "labels": app_df["algorithm"].tolist(),
+                "datasets": [{
+                    "label": f"Avg CPU Usage for {application} (%)",
+                    "data": app_df["avg_cpu_usage"].fillna(0).tolist()
+                }]
+            },
+            "lineChart": {
+                "labels": app_df["algorithm"].tolist(),
+                "datasets": [{
+                    "label": f"Avg Execution Time for {application} (s)",
+                    "data": app_df["avg_execution_time"].fillna(0).tolist()
+                }]
+            },
+            "radarChart": {
+                "labels": ["CPU Usage", "Memory Usage", "Power Usage"],
+                "datasets": [{
+                    "label": f"Resource Usage for {application}",
+                    "data": [
+                        app_df["avg_cpu_usage"].fillna(0).mean() if not app_df["avg_cpu_usage"].empty else 0,
+                        app_df["avg_memory_usage"].fillna(0).mean() if not app_df["avg_memory_usage"].empty else 0,
+                        app_df["avg_power_usage"].fillna(0).mean() if not app_df["avg_power_usage"].empty else 0
+                    ]
+                }]
+            },
+            "trendChart": {
+                "labels": app_df["algorithm"].tolist(),
+                "datasets": [{
+                    "label": f"Avg Throughput for {application} (kbps)",
+                    "data": app_df["avg_throughput"].fillna(0).tolist()
+                }]
+            }
+        }
 
-    radar_chart_data = {
-        "labels": ["CPU Usage", "Memory Usage", "Power Usage"],
-        "datasets": [{
-            "label": "Resource Usage",
-            "data": [
-                df["cpu_usage"].mean(),
-                df["memory_usage"].mean(),
-                df["power_usage"].replace("Not Available", 0).astype(float).mean()
-            ]
-        }]
-    }
-
-    trend_chart_data = {
-        "labels": df["timestamp"].tolist(),
-        "datasets": [{
-            "label": "Throughput (kbps)",
-            "data": df["execution_time"].tolist()
-        }]
-    }
-
-    return jsonify({
-        "lineChart": line_chart_data,
-        "barChart": bar_chart_data,
-        "scatterPlot": scatter_plot_data,
-        "radarChart": radar_chart_data,
-        "trendChart": trend_chart_data
-    })
+    print("[DEBUG] Visualization Data Frame:")
+    print(df)
+    print("[DEBUG] Applications extracted:")
+    print(applications)
+    print("[DEBUG] Generated Visualization Dictionary:")
+    print(visualizations)
+    return jsonify(visualizations)
 
 # Initialize Database Before Running
 initialize_database()
