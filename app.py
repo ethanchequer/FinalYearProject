@@ -1082,22 +1082,31 @@ def get_visualization_data():
     }
     visualizations["combined_execution"] = combined_chart_data
 
-    # Prepare the radar chart for resource usage
+    # Prepare the radar chart for resource usage with additional metrics
     radar_chart_data = {
-        "labels": ["CPU Usage (%)", "Memory Usage (MB)", "Power Usage (W)"],
+        "labels": ["CPU Usage (%)", "Memory Usage (MB)", "Power Usage (W)", "Latency (ms)", "Throughput (kbps)", "Execution Time (s)", "Packet Loss (%)"],
         "datasets": []
     }
 
     algorithms = df["algorithm"].unique().tolist()
+    conn2 = get_db_connection()
     for alg in algorithms:
         alg_df = df[df["algorithm"] == alg]
         avg_cpu = alg_df["cpu_usage"].mean()
         avg_memory = alg_df["memory_usage"].mean()
         avg_power = pd.to_numeric(alg_df["power_usage"].replace("Not Available", 0), errors='coerce').mean()
+        latency_query = pd.read_sql_query("SELECT AVG(encryption_time_ms) FROM packet_latency WHERE algorithm = ?", conn2, params=[alg])
+        avg_latency = latency_query.iloc[0, 0] or 0
+        throughput_query = pd.read_sql_query("SELECT AVG(throughput_kbps) FROM throughput_stats WHERE algorithm = ?", conn2, params=[alg])
+        avg_throughput = throughput_query.iloc[0, 0] or 0
+        avg_execution_time = alg_df["execution_time"].mean()
+        packet_loss_query = pd.read_sql_query("SELECT AVG(packet_loss_rate) FROM packet_loss_stats WHERE algorithm = ?", conn2, params=[alg])
+        avg_packet_loss = packet_loss_query.iloc[0, 0] or 0
         radar_chart_data["datasets"].append({
             "label": alg,
-            "data": [avg_cpu, avg_memory, avg_power]
+            "data": [avg_cpu, avg_memory, avg_power, avg_latency, avg_throughput, avg_execution_time, avg_packet_loss]
         })
+    conn2.close()
 
     print(f"[DEBUG] Radar Chart data: {radar_chart_data}")
     visualizations["resource_usage"] = radar_chart_data
