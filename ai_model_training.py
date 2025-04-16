@@ -16,7 +16,7 @@ import joblib
 
 # Step 2: Load the dataset
 debug_print("Loading the dataset...")
-df = pd.read_csv("results_dataset.csv") # load "pqc_dataset.csv" in pandas dataframe
+df = pd.read_csv("data/results_dataset.csv") # load "pqc_dataset.csv" in pandas dataframe
 debug_print(f"Dataset loaded. Shape: {df.shape}")
 debug_print(f"Columns in dataset: {df.columns.tolist()}")
 print(df.head())  # Display basic info
@@ -137,7 +137,7 @@ debug_print("Model training complete.")
 debug_print(f"Features used during training: {list(X.columns)}")
 
 # Save the model
-model_filename = "optimal_algorithm_model_v2.pkl"
+model_filename = "model/optimal_algorithm_model_v2.pkl"
 joblib.dump(model, model_filename)
 debug_print(f"Model saved to {model_filename}.")
 

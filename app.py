@@ -2,7 +2,7 @@
 # This version of the app runs the execution time, CPU, memory and power usage for the PQC benchmarks.
 import eventlet
 eventlet.monkey_patch()
-from flask import Flask, request, jsonify, render_template, redirect, url_for, send_file # imports Flask and sets up the app
+from flask import Flask, request, jsonify, render_template, send_file # imports Flask and sets up the app
 from flask_socketio import SocketIO, emit
 import time
 import oqs # Python bindings for the OQS library
@@ -19,9 +19,9 @@ import joblib
 app = Flask(__name__)
 socketio = SocketIO(app)
 
-model = joblib.load("optimal_algorithm_model_v2.pkl")
+model = joblib.load("model/optimal_algorithm_model_v2.pkl")
 
-NUM_TRIALS = 10 # Define the number of trials per test to improve accuracy
+
 APPLICATION_TYPES = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"] # Available application types for testing
 ALGORITHM_MAP = {
     "SPHINCS+-128s": "SPHINCS+-SHA2-128s-simple",
@@ -31,7 +31,7 @@ ALGORITHM_MAP = {
 ################## DATABASES ##################
 def get_db_connection():
     """ Connect to the SQLite database. """
-    conn = sqlite3.connect("pqc_results.db", check_same_thread=False)
+    conn = sqlite3.connect("data/pqc_results.db", check_same_thread=False)
     return conn # Returns the SQLite database connection
 def initialize_database():
     """ Initialize the database and tables for results storage. """
@@ -133,7 +133,7 @@ def initialize_database():
 
 ############### LOAD AI MODEL ##################
 try:
-    model = joblib.load("optimal_algorithm_model_v2.pkl")
+    model = joblib.load("model/optimal_algorithm_model_v2.pkl")
     print("[INFO] Trained model loaded successfully.")
 except Exception as e:
     print(f"[ERROR] Failed to load trained model: {e}")
@@ -222,7 +222,7 @@ def simulate_application_traffic(application):
     try:
         if application == "Video Streaming":
             # Check if the sample video exists before streaming
-            if not os.path.exists("sample_video.mp4"):
+            if not os.path.exists("media/sample_video.mp4"):
                 print("[ERROR] sample_video.mp4 not found. Skipping video streaming simulation.")
                 return None
             return subprocess.Popen([
@@ -614,7 +614,7 @@ def benchmark():
 
     return jsonify({"status": "started"})
 
-
+# ESSENTIAL ???????????
 @app.route('/run_tests/<algorithm>', methods=['POST'])
 def run_algorithm_tests(algorithm):
     if algorithm == "SPHINCS+-128s":
@@ -650,14 +650,14 @@ def run_algorithm_tests(algorithm):
     Thread(target=run_tests).start()
     return '', 204
 
-
+# ESSENTIAL ???????????
 @app.route('/run_batch', methods=['POST'])
 def trigger_batch():
     thread = threading.Thread(target=run_automated_batch, args=("lo0",))
     thread.start()
     return jsonify({"message": "Automated batch test started."})
 
-
+# ESSENTIAL ???????????
 @app.route('/export_csv')
 def export_csv():
     conn = get_db_connection()
@@ -706,7 +706,7 @@ def export_csv():
     ) th ON b.algorithm = th.algorithm AND b.application = th.application AND b.timestamp = th.timestamp       
         """, conn)
 
-    csv_path = "pqc_dataset.csv"
+    csv_path = "data/pqc_dataset.csv"
     df.to_csv(csv_path, index=False)
     conn.close()
     return send_file(csv_path, mimetype='text/csv', as_attachment=True)
@@ -819,7 +819,7 @@ def generate_report():
         recommendation=recommendation
     )
 
-
+# ESSENTIAL ???????????
 # Function to send execution time data as JSON for execution time bar chart
 @app.route('/execution_times')
 def get_execution_times():
@@ -832,7 +832,7 @@ def get_execution_times():
 
     return jsonify(avg_exec_time.to_dict(orient="records"))
 
-
+# ESSENTIAL ???????????
 @app.route('/execution_vs_cpu')
 def get_execution_vs_cpu():
     conn = get_db_connection()
@@ -845,7 +845,7 @@ def get_execution_vs_cpu():
     return jsonify(df.to_dict(orient="records"))
 
 
-# API route to return security levels for each algorithm
+# ESSENTIAL ???????????
 @app.route('/security_levels_tested')
 def get_security_levels_tested():
     conn = get_db_connection()
@@ -863,7 +863,7 @@ def get_security_levels_tested():
     }
     return jsonify({alg: security_levels.get(alg, "Unknown") for alg in tested_algorithms})
 
-
+# ESSENTIAL ???????????
 @app.route('/cpu_usage')
 def get_cpu_usage(): # Access collected CPU usage data
     conn = get_db_connection()
@@ -876,7 +876,7 @@ def get_cpu_usage(): # Access collected CPU usage data
     conn.close()
     return jsonify(df.to_dict(orient="records"))
 
-
+# ESSENTIAL ???????????
 @app.route('/memory_usage')
 def get_memory_usage(): # Access collected memory usage data
     conn = get_db_connection()
@@ -894,7 +894,7 @@ def get_memory_usage(): # Access collected memory usage data
     conn.close()
     return jsonify(df.to_dict(orient="records"))
 
-
+# ESSENTIAL ???????????
 @app.route('/latency_stats')
 def get_latency_stats(): # Access latency stats
     conn = get_db_connection()
@@ -908,7 +908,7 @@ def get_latency_stats(): # Access latency stats
     conn.close()
     return jsonify(df.to_dict(orient="records"))
 
-
+# ESSENTIAL ???????????
 @app.route('/throughput_stats')
 def get_throughput_stats():
     conn = get_db_connection()
@@ -980,7 +980,7 @@ def get_recommendation():
     except Exception as e:
         return jsonify({"error": str(e)})
 
-# New route for testing all algorithms for the selected application
+# ESSENTIAL ???????????
 @app.route('/run_all_algorithms_for_application', methods=['POST'])
 def run_all_algorithms_for_application():
     from threading import Thread
