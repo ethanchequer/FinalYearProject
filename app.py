@@ -344,10 +344,37 @@ def get_visualization_data():
     conn.close()
     return jsonify(visualizations)
 
-# Initialize Database Before Running
-initialize_database()
+@app.route('/cpu_usage')
+def get_cpu_usage(): # Access collected CPU usage data
+    conn = get_db_connection()
+    df = pd.read_sql_query("""
+        SELECT algorithm, 
+               AVG(cpu_usage) AS avg_cpu_usage
+        FROM pqc_benchmarks
+        GROUP BY algorithm
+    """, conn)
+    conn.close()
+    return jsonify(df.to_dict(orient="records"))
+
+@app.route('/memory_usage')
+def get_memory_usage(): # Access collected memory usage data
+    conn = get_db_connection()
+    df = pd.read_sql_query("""
+        SELECT algorithm, 
+               AVG(memory_usage) AS avg_memory_usage, 
+               CASE 
+                   WHEN LOWER(power_usage) = 'not available' OR power_usage IS NULL 
+                   THEN 'Not Available'
+                   ELSE power_usage
+               END AS power_usage
+        FROM pqc_benchmarks
+        GROUP BY algorithm
+    """, conn)
+    conn.close()
+    return jsonify(df.to_dict(orient="records"))
 
 
 # Run Flask App
 if __name__ == '__main__':
+    initialize_database()
     socketio.run(app, host="0.0.0.0", port=8000) # If this script is run directly, start the Flask app

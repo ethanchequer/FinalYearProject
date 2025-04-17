@@ -22,6 +22,8 @@ def initialize_database():
         cursor.execute("ALTER TABLE pqc_benchmarks ADD COLUMN packet_count_requested INTEGER")
     if "optimal_algorithm" not in columns:
         cursor.execute("ALTER TABLE pqc_benchmarks ADD COLUMN optimal_algorithm TEXT")
+    if "packet_loss" not in columns:
+        cursor.execute("ALTER TABLE pqc_benchmarks ADD COLUMN packet_loss REAL")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS pqc_benchmarks (
@@ -35,6 +37,7 @@ def initialize_database():
             timeout INTEGER,
             packet_count_requested INTEGER,
             optimal_algorithm TEXT,
+            packet_loss REAL,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)

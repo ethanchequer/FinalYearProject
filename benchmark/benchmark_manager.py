@@ -24,6 +24,8 @@ class BenchmarkManager:
         tracemalloc.start()
         start_time = time.time()
         process = psutil.Process()
+        start_cpu = process.cpu_percent(interval=None)
+        start_mem = process.memory_info().vms / (1024 * 1024)  # in MB
 
         # Simulate traffic
         self.simulator.simulate(self.application)
@@ -35,9 +37,8 @@ class BenchmarkManager:
         )
 
         end_time = time.time()
-        cpu_percent = process.cpu_percent(interval=None)
-        memory_info = process.memory_info()
-        current, peak = tracemalloc.get_traced_memory()
+        end_cpu = process.cpu_percent(interval=None)
+        end_mem = process.memory_info().vms / (1024 * 1024)  # in MB
         tracemalloc.stop()
 
         # Calculate performance metrics
@@ -46,8 +47,8 @@ class BenchmarkManager:
             "algorithm": self.algorithm,
             "application": self.application,
             "execution_time": execution_time,
-            "cpu_usage": cpu_percent,
-            "memory_usage": memory_info.rss / (1024 ** 2),  # in MB
+            "cpu_usage": abs(end_cpu - start_cpu),
+            "memory_usage": abs(end_mem - start_mem),
             "power_usage": 0,  # Placeholder if not available
             "packet_loss": packet_stats.get("packet_loss", 0),
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")

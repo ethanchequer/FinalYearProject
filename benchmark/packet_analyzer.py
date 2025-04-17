@@ -33,6 +33,7 @@ class PacketAnalyzer:
         total_successful = 0
         latency_recorded = False
 
+        sig_obj = None
         if algorithm == "Kyber512":
             kem = oqs.KeyEncapsulation("Kyber512")
             public_key = kem.generate_keypair()
@@ -41,7 +42,6 @@ class PacketAnalyzer:
             public_key = sig_obj.generate_keypair()
         else:
             public_key = None
-            sig_obj = None
 
         def process_packet(packet):
             nonlocal total_seen, total_successful, latency_recorded
