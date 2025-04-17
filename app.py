@@ -1,8 +1,8 @@
 # app.py handles benchmarking and web routes
 import eventlet
 eventlet.monkey_patch()
-from flask import Flask, request, jsonify, render_template, send_file # imports Flask and sets up the app
-from flask_socketio import SocketIO, emit
+from flask import Flask, request, jsonify, render_template # imports Flask and sets up the app
+from flask_socketio import SocketIO
 from database.db_manager import get_db_connection, initialize_database, extract_features_from_db
 import pandas as pd
 import threading
@@ -264,7 +264,6 @@ def get_recommendation():
     except Exception as e:
         return jsonify({"error": str(e)})
 
-# ESSENTIAL ???????????
 @app.route('/run_all_algorithms_for_application', methods=['POST'])
 def run_all_algorithms_for_application():
     from threading import Thread
