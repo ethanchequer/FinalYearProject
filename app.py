@@ -340,6 +340,40 @@ def get_visualization_data():
         "performance_metrics_radar": visualizer.generate_radar_chart_data(df, conn, metric_type="performance")
     }
 
+    # Latency over time data (line charts per algorithm)
+    algorithms = ['Kyber512', 'Dilithium2', 'SPHINCS+-SHA2-128s-simple']
+    applications = ['Web Browsing', 'VoIP', 'Video Streaming', 'File Transfer']
+
+    for alg in algorithms:
+        chart_id = f"{alg}_latency_over_time"
+        visualizations[chart_id] = {
+            "labels": [],
+            "datasets": []
+        }
+
+        for app in applications:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT encryption_time_ms
+                FROM packet_latency
+                WHERE algorithm = ? AND application = ?
+                ORDER BY id ASC
+                LIMIT 100
+            """, (alg, app))
+            results = cursor.fetchall()
+            latencies = [row[0] for row in results]
+            labels = list(range(1, len(latencies) + 1))  # Packet index
+
+            if not visualizations[chart_id]["labels"]:
+                visualizations[chart_id]["labels"] = labels
+
+            visualizations[chart_id]["datasets"].append({
+                "label": app,
+                "data": latencies,
+                "borderWidth": 2,
+                "fill": False
+            })
+
     conn.close()
     return jsonify(visualizations)
 

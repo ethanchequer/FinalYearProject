@@ -211,6 +211,55 @@
                 } else if (chartId.includes("performance_metrics_radar")) {
                     chartType = 'radar';
                     chartTitle = 'Performance Metrics';
+                } else if (chartId.includes("latency_over_time")) {
+                    chartType = 'line';
+                    chartTitle = chartId.replaceAll("_", " ").replace("latency over time", "Latency Over Time");
+
+                    // Customize time series options
+                    const lineOptions = {
+                        responsive: true,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: chartTitle,
+                                color: '#ffcc00',
+                                font: {
+                                    size: 18
+                                }
+                            },
+                            legend: {
+                                display: true,
+                                labels: {
+                                    color: 'white'
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Packet Number',
+                                    color: 'white'
+                                },
+                                ticks: {
+                                    color: 'white'
+                                }
+                            },
+                            y: {
+                                title: {
+                                    display: true,
+                                    text: 'Latency (ms)',
+                                    color: 'white'
+                                },
+                                ticks: {
+                                    color: 'white'
+                                }
+                            }
+                        }
+                    };
+
+                    generateChart(canvasId, chartType, chartData, lineOptions);
+                    continue;
                 } else {
                     chartType = 'bar';
                     chartTitle = "Execution Time (s)";
