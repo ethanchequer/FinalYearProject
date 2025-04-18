@@ -1,56 +1,185 @@
-# app.py handles benchmarking and web routes
+"""
+app.py
+
+This module initializes and runs the Flask web application. It defines API endpoints for benchmarking PQC algorithms,
+retrieving the report page, and visualizing performance data. It also integrates an AI model to recommend optimal
+algorithms and manages background benchmarking using multithreading.
+"""
+
+# Monkey-patch standard library for async IO with Eventlet (required by Flask-SocketIO)
 import eventlet
+
 eventlet.monkey_patch()
-from flask import Flask, request, jsonify, render_template # imports Flask and sets up the app
-from flask_socketio import SocketIO
+# Import Flask to set up the web app
+from flask import Flask, request, jsonify, render_template
+from flask_socketio import SocketIO  # adds real-time WebSocket support to Flask
+# Import internal modules
 from database.db_manager import get_db_connection, initialize_database, extract_features_from_db
-import pandas as pd
-import threading
 from ai.model import AIModel
 from benchmark.benchmark_manager import BenchmarkManager
 from visualizations.visualizations import VisualizationManager
+# pandas is used to read SQL query results into DataFrames and pass data to templates for visualization and AI analysis
+import pandas as pd
+# threading allows for benchmarking tasks to run in the background
+import threading
+from threading import Thread
 
-app = Flask(__name__)
-socketio = SocketIO(app)
+app = Flask(__name__)  # Initialize the Flask web application
+socketio = SocketIO(app)  # Enable WebSocket support using Flask-SocketIO
 
-model = AIModel()
+model = AIModel()  # Load the optimal algorithm AI model
 
-APPLICATION_TYPES = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"] # Available application types for testing
+# List of supported application types for traffic simulation
+APPLICATION_TYPES = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"]
+# Maps shortened SPHINCS+ algorithm name to the oqs internal identifier
 ALGORITHM_MAP = {
     "SPHINCS+-128s": "SPHINCS+-SHA2-128s-simple",
 }
 
-@app.route('/') # # Route for Home Page (index.html)
+
+""" 
+User Interface Pages
+These routes render web pages for users: the home page and the report page.
+"""
+
+# API route for Home Page (index.html)
+@app.route('/')
 def home():
-    return render_template("index.html", applications=APPLICATION_TYPES) # Pass available application types to the UI
+    return render_template("index.html", applications=APPLICATION_TYPES)
 
-@app.route('/benchmark', methods=['POST']) # Creates a /benchmark API route that accepts POST requests
+
+# API route to generate the Report Page (shows test results)
+@app.route('/report')
+def generate_report():
+    conn = get_db_connection()
+    # Query benchmark results
+    df = pd.read_sql_query("""
+        SELECT 
+            CASE 
+                WHEN algorithm LIKE 'SPHINCS+%' THEN 'SPHINCS+-128s'
+                ELSE algorithm 
+            END AS algorithm,
+            application,
+            execution_time,
+            cpu_usage,
+            memory_usage,
+            power_usage,
+            timestamp
+        FROM pqc_benchmarks
+        ORDER BY timestamp DESC
+    """, conn)
+    # Query average, min, and max latency per algorithm and application
+    latency_df = pd.read_sql_query("""
+        SELECT 
+            CASE 
+                WHEN algorithm LIKE 'SPHINCS+%' THEN 'SPHINCS+-128s'
+                ELSE algorithm 
+            END AS algorithm,
+            application,
+            AVG(encryption_time_ms) AS avg_latency,
+            MIN(encryption_time_ms) AS min_latency,
+            MAX(encryption_time_ms) AS max_latency
+        FROM packet_latency
+        GROUP BY algorithm, application
+    """, conn)
+    # Query packet loss stats and compute packet loss rate
+    loss_df = pd.read_sql_query("""
+              SELECT 
+          CASE 
+              WHEN algorithm LIKE 'SPHINCS+%' THEN 'SPHINCS+-128s'
+              ELSE algorithm 
+          END AS algorithm,
+          application,
+          AVG(packets_sent) AS packets_sent,
+          AVG(packets_received) AS packets_successful,
+          ROUND(AVG(packets_sent) - AVG(packets_received), 2) AS packets_failed,
+          CASE 
+              WHEN AVG(packets_sent) > 0 
+              THEN ROUND((1 - (AVG(packets_received) / AVG(packets_sent))), 2)
+              ELSE 0 
+          END AS packet_loss_rate
+      FROM packet_loss_stats
+      GROUP BY algorithm, application
+  """, conn)
+    # Query average throughput in kbps
+    throughput_df = pd.read_sql_query("""
+          SELECT 
+              CASE 
+                  WHEN algorithm LIKE 'SPHINCS+%' THEN 'SPHINCS+-128s'
+                  ELSE algorithm 
+              END AS algorithm,
+              application,
+              AVG(throughput_kbps) AS avg_throughput_kbps
+          FROM throughput_stats
+          GROUP BY algorithm, application
+      """, conn)
+    conn.close()
+
+    # Try fetching the most recent AI recommendation from the benchmarks table
+    recommendation = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT optimal_algorithm FROM pqc_benchmarks ORDER BY timestamp DESC LIMIT 1")
+        result = cursor.fetchone()
+        if result and result[0]:
+            recommendation = result[0]
+        else:
+            recommendation = "No recommendation yet"
+        conn.close()
+    except Exception as e:
+        print(f"[ERROR] Failed to fetch AI recommendation: {e}")
+        recommendation = "No recommendation yet"
+
+    # Render the report template and pass all the gathered data to it
+    return render_template(
+        "report.html",
+        data=df.to_dict(orient="records"), # Main benchmark results
+        titles=df.columns.values, # Column headers for table
+        latency_data=latency_df.to_dict(orient="records"), # Latency stats
+        packet_loss_data=loss_df.to_dict(orient="records"), # Packet loss stats
+        throughput_data=throughput_df.to_dict(orient="records"), # Throughput stats
+        recommendation=recommendation # AI-generated optimal algorithm
+    )
+
+
+""" 
+Benchmarking: Running Tests
+These endpoints trigger benchmarking processes for PQC algorithms and applications.
+"""
+
+# API endpoint that starts a benchmark test based on JSON parameters in POST request
+@app.route('/benchmark', methods=['POST'])
 def benchmark():
-    data = request.json
+    data = request.json # Retrieve JSON data sent in the POST request
     algorithm = ALGORITHM_MAP.get(data.get("algorithm"), data.get("algorithm"))
+    # Extract application type and other optional test parameters
     application = data.get("application")
-    packet_count = data.get("packet_count", 50)
-    timeout = data.get("timeout", 30)
-    interface = data.get("interface", "lo0")
+    packet_count = data.get("packet_count", 50) # Default to 50 packets if not specified
+    timeout = data.get("timeout", 30) # Default timeout is 30 seconds
+    interface = data.get("interface", "lo0") # Use eth0 interface by default
 
+    # Ensures both algorithm and application are provided
     if not algorithm or not application:
         return jsonify({"error": "Algorithm or application not selected"}), 400
 
-
+    # Initializes and runs the benchmark test
     def run_benchmark():
         manager = BenchmarkManager(algorithm, application, packet_count, timeout, interface)
         manager.run_benchmark()
 
+    # Run the benchmark in a separate thread to keep the server responsive
     thread = threading.Thread(target=run_benchmark)
     thread.start()
 
-    return jsonify({"status": "started"})
+    return jsonify({"status": "started"}) # returns test successfully started
 
+
+# API endpoint to run all application benchmarks for a specific algorithm ---> REMOVE ???
 @app.route('/run_tests/<algorithm>', methods=['POST'])
 def run_algorithm_tests(algorithm):
     if algorithm == "SPHINCS+-128s":
         algorithm = "SPHINCS+-SHA2-128s-simple"
-    from threading import Thread
 
     def run_tests():
         applications = ["Video Streaming", "File Transfer", "VoIP", "Web Browsing"]
@@ -71,128 +200,195 @@ def run_algorithm_tests(algorithm):
 
         for app in applications:
             print(f"[NEW TEST] Starting test for {algorithm} - {app}")
-            socketio.emit('test_progress', {'progress': int((completed / total) * 100), 'current_test': f"{algorithm} - {app}"})
+            socketio.emit('test_progress',
+                          {'progress': int((completed / total) * 100), 'current_test': f"{algorithm} - {app}"})
             from benchmark.benchmark_manager import BenchmarkManager
             manager = BenchmarkManager(algorithm, app, packet_map[app], timeout_map[app], "lo0")
             manager.run_benchmark()
             completed += 1
-            socketio.emit('test_progress', {'progress': int((completed / total) * 100), 'current_test': f"{algorithm} - {app}"})
+            socketio.emit('test_progress',
+                          {'progress': int((completed / total) * 100), 'current_test': f"{algorithm} - {app}"})
 
         print(f"[DEBUG] Finished all tests for {algorithm}")
 
     Thread(target=run_tests).start()
     return '', 204
 
-@app.route('/reset_database', methods=['POST'])
-def reset_database():
+
+# API route that benchmarks all supported algorithms for a single application
+@app.route('/run_all_algorithms_for_application', methods=['POST'])
+def run_all_algorithms_for_application():
+    from threading import Thread
+    application = request.json.get("application", None) # extract the application type from the JSON request payload
+    # If no application is specified in the request, return an error
+    if not application:
+        return jsonify({"error": "Application not specified"}), 400
+
+    from benchmark.benchmark_manager import BenchmarkManager # Import benchmark manager for running tests
+    # Function to run benchmarks for all algorithms in the background
+    def run_all_for_application():
+        algorithms = ["Kyber512", "Dilithium2", "SPHINCS+-SHA2-128s-simple"] # Supported PQC algorithms
+        packet_count = 50  # Default number of packets to simulate
+        timeout = 30  # Default timeout is 30 seconds for each benchmark
+        interface = "lo0"  # Use eth0 interface by default
+        results = []  # Store results to determine the most optimal algorithm later
+
+        for algo in algorithms:
+            print(f"[NEW TEST] Starting test for {algo} - {application}")
+            manager = BenchmarkManager(algo, application, packet_count, timeout, interface)
+            manager.run_benchmark()
+
+            # Get the latest test result from the database and print it
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM pqc_benchmarks ORDER BY timestamp DESC LIMIT 1")
+            latest_test = cursor.fetchone()
+            conn.close()
+
+            if latest_test:
+                print(f"[REPORT] Latest test result for {algo} - {application}: {latest_test}")
+                features = extract_features_from_db(latest_test)  # Prepare feature data for AI model
+                try:
+                    prediction = model.predict_optimal_algorithm([features])[0]
+                    print(f"[INFO] Predicted optimal algorithm for {algo} - {application}: {prediction}")
+                    results.append((algo, prediction))
+                except Exception as e:
+                    print(f"[ERROR] Model prediction failed for {algo} - {application}: {e}")
+                    results.append((algo, "Prediction Error"))
+
+        # Determine the best algorithm based on predictions
+        best_algorithm = max(results, key=lambda x: x[1] if x[1] != "Prediction Error" else 0)[0]
+        print(f"[INFO] Best algorithm for {application}: {best_algorithm}")
+
+        # Store the recommended algorithm in the database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE pqc_benchmarks 
+            SET optimal_algorithm = ? 
+            WHERE id = (SELECT MAX(id) FROM pqc_benchmarks WHERE application = ?)
+        """, (best_algorithm, application))
+        conn.commit()
+        conn.close()
+
+        print("[FINAL] Tests and recommendations have been successfully generated.")
+    # Run the benchmarking and prediction process in a separate thread to avoid blocking
+    Thread(target=run_all_for_application).start()
+    return jsonify({"message": f"Running all algorithms for the selected application: {application}"}), 200
+
+
+""" 
+Results Retrieval for UI
+These endpoints provide benchmark and visualization data to the frontend (graphs, tables, metric results).
+"""
+
+# API route to provide visualization data for all graphs on the report page
+@app.route('/get_visualization_data')
+def get_visualization_data():
     conn = get_db_connection()
-    cursor = conn.cursor()
-
-    # Clear all known result tables
-    cursor.execute("DELETE FROM pqc_benchmarks")
-    cursor.execute("DELETE FROM encrypted_traffic")
-    cursor.execute("DELETE FROM packet_stats")
-    cursor.execute("DELETE FROM packet_latency")
-    cursor.execute("DELETE FROM packet_loss_stats")
-
-    conn.commit()
-    conn.close()
-    return jsonify({'message': 'Database cleared successfully.'})
-
-@app.route('/report') # Defines the Report Page route (Shows Test Results)
-def generate_report():
-    conn = get_db_connection()
+    # Fetch benchmarking results
     df = pd.read_sql_query("""
-        SELECT 
-            CASE 
-                WHEN algorithm LIKE 'SPHINCS+%' THEN 'SPHINCS+-128s'
-                ELSE algorithm 
-            END AS algorithm,
-            application,
-            execution_time,
-            cpu_usage,
-            memory_usage,
-            power_usage,
-            timestamp
+        SELECT algorithm, application, execution_time, cpu_usage, memory_usage, power_usage, timestamp
         FROM pqc_benchmarks
         ORDER BY timestamp DESC
     """, conn)
-    latency_df = pd.read_sql_query("""
-        SELECT 
-            CASE 
-                WHEN algorithm LIKE 'SPHINCS+%' THEN 'SPHINCS+-128s'
-                ELSE algorithm 
-            END AS algorithm,
-            application,
-            AVG(encryption_time_ms) AS avg_latency,
-            MIN(encryption_time_ms) AS min_latency,
-            MAX(encryption_time_ms) AS max_latency
-        FROM packet_latency
-        GROUP BY algorithm, application
-    """, conn)
 
-    loss_df = pd.read_sql_query("""
-              SELECT 
-          CASE 
-              WHEN algorithm LIKE 'SPHINCS+%' THEN 'SPHINCS+-128s'
-              ELSE algorithm 
-          END AS algorithm,
-          application,
-          AVG(packets_sent) AS packets_sent,
-          AVG(packets_received) AS packets_successful,
-          ROUND(AVG(packets_sent) - AVG(packets_received), 2) AS packets_failed,
-          CASE 
-              WHEN AVG(packets_sent) > 0 
-              THEN ROUND((1 - (AVG(packets_received) / AVG(packets_sent))), 2)
-              ELSE 0 
-          END AS packet_loss_rate
-      FROM packet_loss_stats
-      GROUP BY algorithm, application
-  """, conn)
+    # Create instance of the visualization manager, which handles data formatting for charts
+    visualizer = VisualizationManager()
+    # Generate default visualizations using helper methods
+    visualizations = {
+        "combined_execution": visualizer.generate_execution_bar_data(df),  # Combined execution time bar chart
+        "resource_usage_radar": visualizer.generate_radar_chart_data(df, conn, metric_type="resource"), # CPU/memory/power radar
+        "performance_metrics_radar": visualizer.generate_radar_chart_data(df, conn, metric_type="performance")  # Execution/throughput/loss radar
+    }
 
-    throughput_df = pd.read_sql_query("""
-          SELECT 
-              CASE 
-                  WHEN algorithm LIKE 'SPHINCS+%' THEN 'SPHINCS+-128s'
-                  ELSE algorithm 
-              END AS algorithm,
-              application,
-              AVG(throughput_kbps) AS avg_throughput_kbps
-          FROM throughput_stats
-          GROUP BY algorithm, application
-      """, conn)
+    # Define all algorithms and applications for latency line graphs
+    algorithms = ['Kyber512', 'Dilithium2', 'SPHINCS+-SHA2-128s-simple']
+    applications = ['Web Browsing', 'VoIP', 'Video Streaming', 'File Transfer']
+
+    # Loop through each algorithm to generate latency-over-time graphs
+    for alg in algorithms:
+        chart_id = f"{alg}_latency_over_time"  # Chart key for frontend rendering
+        visualizations[chart_id] = {
+            "labels": [],  # Will represent packet numbers (1, 2, ..., N)
+            "datasets": []  # One dataset per application type
+        }
+
+        # Query and structure latency results for each application
+        for app in applications:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT encryption_time_ms
+                FROM packet_latency
+                WHERE algorithm = ? AND application = ?
+                ORDER BY id ASC
+                LIMIT 100
+            """, (alg, app))
+            results = cursor.fetchall()
+
+            # Extract latency times and assign sequential packet indices
+            latencies = [row[0] for row in results]  # Latency time
+            labels = list(range(1, len(latencies) + 1))  # Packet index
+            # Only set labels once per graph
+            if not visualizations[chart_id]["labels"]:
+                visualizations[chart_id]["labels"] = labels
+
+            # Append each application's latency data as a separate line
+            visualizations[chart_id]["datasets"].append({
+                "label": app,
+                "data": latencies,
+                "borderWidth": 2,
+                "fill": False  # No area fill under the line
+            })
+
     conn.close()
+    return jsonify(visualizations)  # Return all chart-ready data as a JSON response
 
-    recommendation = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT optimal_algorithm FROM pqc_benchmarks ORDER BY timestamp DESC LIMIT 1")
-        result = cursor.fetchone()
-        if result and result[0]:
-            recommendation = result[0]
-        else:
-            recommendation = "No recommendation yet"
-        conn.close()
-    except Exception as e:
-        print(f"[ERROR] Failed to fetch AI recommendation: {e}")
-        recommendation = "No recommendation yet"
 
-    return render_template(
-        "report.html",
-        data=df.to_dict(orient="records"),
-        titles=df.columns.values,
-        latency_data=latency_df.to_dict(orient="records"),
-        packet_loss_data=loss_df.to_dict(orient="records"),
-        throughput_data=throughput_df.to_dict(orient="records"),
-        recommendation=recommendation
-    )
+# API route to retrieve average CPU usage for each tested algorithm
+@app.route('/cpu_usage')
+def get_cpu_usage():  # Access collected CPU usage data
+    conn = get_db_connection()
+    # Query average CPU usage grouped by algorithm from the benchmarking table
+    df = pd.read_sql_query("""
+        SELECT algorithm, 
+               AVG(cpu_usage) AS avg_cpu_usage
+        FROM pqc_benchmarks
+        GROUP BY algorithm
+    """, conn)
+    conn.close()
+    return jsonify(df.to_dict(orient="records"))  # Convert the result to a list of dictionaries and return as JSON
 
+
+# API route to retrieve average memory usage and power usage for each tested algorithm
+@app.route('/memory_usage')
+def get_memory_usage():
+    conn = get_db_connection()
+    # Query average memory usage and power usage, grouped by algorithm
+    # Handles cases where power usage is missing or marked as "Not Available"
+    df = pd.read_sql_query("""
+        SELECT algorithm, 
+               AVG(memory_usage) AS avg_memory_usage, 
+               CASE 
+                   WHEN LOWER(power_usage) = 'not available' OR power_usage IS NULL 
+                   THEN 'Not Available'
+                   ELSE power_usage
+               END AS power_usage
+        FROM pqc_benchmarks
+        GROUP BY algorithm
+    """, conn)
+    conn.close()
+    return jsonify(df.to_dict(orient="records"))  # Return the results as a JSON object
+
+
+# API route that returns a JSON object mapping each tested algorithm to its NIST-defined security level
 @app.route('/security_levels_tested')
 def get_security_levels_tested():
     conn = get_db_connection()
+    # Query all distinct algorithms from benchmark results
     df = pd.read_sql_query("SELECT DISTINCT algorithm FROM pqc_benchmarks", conn)
     conn.close()
+    # Extract list of tested algorithms from the DataFrame
     tested_algorithms = df["algorithm"].tolist()
     # NIST Security Levels Dictionary
     security_levels = {
@@ -205,6 +401,8 @@ def get_security_levels_tested():
     }
     return jsonify({alg: security_levels.get(alg, "Unknown") for alg in tested_algorithms})
 
+
+# API route that retrieves or calculates the recommended optimal PQC algorithm based on test results
 @app.route('/get_recommendation', methods=['GET'])
 def get_recommendation():
     try:
@@ -264,150 +462,30 @@ def get_recommendation():
     except Exception as e:
         return jsonify({"error": str(e)})
 
-@app.route('/run_all_algorithms_for_application', methods=['POST'])
-def run_all_algorithms_for_application():
-    from threading import Thread
-    application = request.json.get("application", None)
 
-    if not application:
-        return jsonify({"error": "Application not specified"}), 400
-
-    from benchmark.benchmark_manager import BenchmarkManager
-    def run_all_for_application():
-        algorithms = ["Kyber512", "Dilithium2", "SPHINCS+-SHA2-128s-simple"]
-        packet_count = 50
-        timeout = 30
-        interface = "lo0"
-        results = []
-
-        for algo in algorithms:
-            print(f"[NEW TEST] Starting test for {algo} - {application}")
-            manager = BenchmarkManager(algo, application, packet_count, timeout, interface)
-            manager.run_benchmark()
-
-            # Get the latest test result from the database and print it
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM pqc_benchmarks ORDER BY timestamp DESC LIMIT 1")
-            latest_test = cursor.fetchone()
-            conn.close()
-
-            if latest_test:
-                print(f"[REPORT] Latest test result for {algo} - {application}: {latest_test}")
-                features = extract_features_from_db(latest_test)
-                try:
-                    prediction = model.predict_optimal_algorithm([features])[0]
-                    print(f"[INFO] Predicted optimal algorithm for {algo} - {application}: {prediction}")
-                    results.append((algo, prediction))
-                except Exception as e:
-                    print(f"[ERROR] Model prediction failed for {algo} - {application}: {e}")
-                    results.append((algo, "Prediction Error"))
-
-        # Determine the best algorithm based on predictions
-        best_algorithm = max(results, key=lambda x: x[1] if x[1] != "Prediction Error" else 0)[0]
-        print(f"[INFO] Best algorithm for {application}: {best_algorithm}")
-
-        # Store the recommended algorithm in the database
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE pqc_benchmarks 
-            SET optimal_algorithm = ? 
-            WHERE id = (SELECT MAX(id) FROM pqc_benchmarks WHERE application = ?)
-        """, (best_algorithm, application))
-        conn.commit()
-        conn.close()
-
-        print("[FINAL] Tests and recommendations have been successfully generated.")
-
-    Thread(target=run_all_for_application).start()
-    return jsonify({"message": f"Running all algorithms for the selected application: {application}"}), 200
-
-@app.route('/get_visualization_data')
-def get_visualization_data():
+""" 
+Utility / Maintenance
+Route for optionally resetting the database when running new tests.
+"""
+# API endpoint to reset the database by clearing all result tables
+@app.route('/reset_database', methods=['POST'])
+def reset_database():
     conn = get_db_connection()
-    df = pd.read_sql_query("""
-        SELECT algorithm, application, execution_time, cpu_usage, memory_usage, power_usage, timestamp
-        FROM pqc_benchmarks
-        ORDER BY timestamp DESC
-    """, conn)
+    cursor = conn.cursor()
 
-    visualizer = VisualizationManager()
+    # Clear all known result tables
+    cursor.execute("DELETE FROM pqc_benchmarks")
+    cursor.execute("DELETE FROM encrypted_traffic")
+    cursor.execute("DELETE FROM packet_stats")
+    cursor.execute("DELETE FROM packet_latency")
+    cursor.execute("DELETE FROM packet_loss_stats")
 
-    visualizations = {
-        "combined_execution": visualizer.generate_execution_bar_data(df),
-        "resource_usage_radar": visualizer.generate_radar_chart_data(df, conn, metric_type="resource"),
-        "performance_metrics_radar": visualizer.generate_radar_chart_data(df, conn, metric_type="performance")
-    }
-
-    # Latency over time data (line charts per algorithm)
-    algorithms = ['Kyber512', 'Dilithium2', 'SPHINCS+-SHA2-128s-simple']
-    applications = ['Web Browsing', 'VoIP', 'Video Streaming', 'File Transfer']
-
-    for alg in algorithms:
-        chart_id = f"{alg}_latency_over_time"
-        visualizations[chart_id] = {
-            "labels": [],
-            "datasets": []
-        }
-
-        for app in applications:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT encryption_time_ms
-                FROM packet_latency
-                WHERE algorithm = ? AND application = ?
-                ORDER BY id ASC
-                LIMIT 100
-            """, (alg, app))
-            results = cursor.fetchall()
-            latencies = [row[0] for row in results]
-            labels = list(range(1, len(latencies) + 1))  # Packet index
-
-            if not visualizations[chart_id]["labels"]:
-                visualizations[chart_id]["labels"] = labels
-
-            visualizations[chart_id]["datasets"].append({
-                "label": app,
-                "data": latencies,
-                "borderWidth": 2,
-                "fill": False
-            })
-
+    conn.commit()
     conn.close()
-    return jsonify(visualizations)
-
-@app.route('/cpu_usage')
-def get_cpu_usage(): # Access collected CPU usage data
-    conn = get_db_connection()
-    df = pd.read_sql_query("""
-        SELECT algorithm, 
-               AVG(cpu_usage) AS avg_cpu_usage
-        FROM pqc_benchmarks
-        GROUP BY algorithm
-    """, conn)
-    conn.close()
-    return jsonify(df.to_dict(orient="records"))
-
-@app.route('/memory_usage')
-def get_memory_usage(): # Access collected memory usage data
-    conn = get_db_connection()
-    df = pd.read_sql_query("""
-        SELECT algorithm, 
-               AVG(memory_usage) AS avg_memory_usage, 
-               CASE 
-                   WHEN LOWER(power_usage) = 'not available' OR power_usage IS NULL 
-                   THEN 'Not Available'
-                   ELSE power_usage
-               END AS power_usage
-        FROM pqc_benchmarks
-        GROUP BY algorithm
-    """, conn)
-    conn.close()
-    return jsonify(df.to_dict(orient="records"))
+    return jsonify({'message': 'Database cleared successfully.'})
 
 
 # Run Flask App
 if __name__ == '__main__':
     initialize_database()
-    socketio.run(app, host="0.0.0.0", port=8000) # If this script is run directly, start the Flask app
+    socketio.run(app, host="0.0.0.0", port=8000)  # If this script is run directly, start the Flask app
