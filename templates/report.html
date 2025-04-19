@@ -156,7 +156,6 @@
         <div class="visualizations" id="chart-container">
             <h3>Performance Visualizations</h3>
             <div id="resource-chart"></div>
-            <div id="performance-chart"></div>
         </div>
     </div>
     <a href="/" class="back-button">Run Another Test</a>
@@ -208,9 +207,6 @@
                 if (chartId.includes("resource_usage_radar")) {
                     chartType = 'radar';
                     chartTitle = 'Resource Usage Metrics';
-                } else if (chartId.includes("performance_metrics_radar")) {
-                    chartType = 'radar';
-                    chartTitle = 'Performance Metrics';
                 } else if (chartId.includes("latency_over_time")) {
                     chartType = 'line';
                     chartTitle = chartId.replaceAll("_", " ").replace("latency over time", "Latency Over Time");
