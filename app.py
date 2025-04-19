@@ -488,4 +488,4 @@ def reset_database():
 # Run Flask App
 if __name__ == '__main__':
     initialize_database()
-    socketio.run(app, host="0.0.0.0", port=8000)  # If this script is run directly, start the Flask app
+    socketio.run(app, host="0.0.0.0", port=8000)
