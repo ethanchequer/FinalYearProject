@@ -4,6 +4,7 @@ import oqs
 from scapy.all import sniff, Raw
 import time
 from database.db_manager import get_db_connection
+import psutil
 
 class PacketAnalyzer:
     def __init__(self):
@@ -87,6 +88,11 @@ class PacketAnalyzer:
         loss_rate = ((total_seen - total_successful) / total_seen) if total_seen else 0
         packets_failed = total_seen - total_successful
 
+        # Estimate power usage based on CPU usage as a proxy (placeholder logic)
+        # Here we simulate this by assuming a basic scaling factor
+        process = psutil.Process()
+        power_usage = process.cpu_percent(interval=0.1)  # Approximate CPU usage %
+
         if not latency_recorded:
             print(f"[WARN] No latency recorded for {algorithm} - {application}")
 
@@ -104,4 +110,9 @@ class PacketAnalyzer:
         conn.commit()
         conn.close()
 
-        return {"total_packets": total_seen, "successful": total_successful, "packet_loss": packets_failed}
+        return {
+            "total_packets": total_seen,
+            "successful": total_successful,
+            "packet_loss": packets_failed,
+            "estimated_power_usage": power_usage
+        }
