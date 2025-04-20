@@ -7,7 +7,7 @@ import psutil
 import tracemalloc
 
 class BenchmarkManager:
-    def __init__(self, algorithm, application, packet_count, timeout, interface="lo0"):
+    def __init__(self, algorithm, application, packet_count, timeout, interface="eth0"):
         self.algorithm = algorithm
         self.application = application
         self.packet_count = packet_count

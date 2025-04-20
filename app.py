@@ -157,7 +157,7 @@ def benchmark():
     application = data.get("application")
     packet_count = data.get("packet_count", 50) # Default to 50 packets if not specified
     timeout = data.get("timeout", 30) # Default timeout is 30 seconds
-    interface = data.get("interface", "lo0") # Use eth0 interface by default
+    interface = data.get("interface", "eth0") # Use eth0 interface by default
 
     # Ensures both algorithm and application are provided
     if not algorithm or not application:
@@ -203,7 +203,7 @@ def run_algorithm_tests(algorithm):
             socketio.emit('test_progress',
                           {'progress': int((completed / total) * 100), 'current_test': f"{algorithm} - {app}"})
             from benchmark.benchmark_manager import BenchmarkManager
-            manager = BenchmarkManager(algorithm, app, packet_map[app], timeout_map[app], "lo0")
+            manager = BenchmarkManager(algorithm, app, packet_map[app], timeout_map[app], "eth0")
             manager.run_benchmark()
             completed += 1
             socketio.emit('test_progress',
@@ -230,7 +230,7 @@ def run_all_algorithms_for_application():
         algorithms = ["Kyber512", "Dilithium2", "SPHINCS+-SHA2-128s-simple"] # Supported PQC algorithms
         packet_count = 50  # Default number of packets to simulate
         timeout = 30  # Default timeout is 30 seconds for each benchmark
-        interface = "lo0"  # Use eth0 interface by default
+        interface = "eth0"  # Use eth0 interface by default
         results = []  # Store results to determine the most optimal algorithm later
 
         for algo in algorithms:
