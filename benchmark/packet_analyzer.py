@@ -88,10 +88,10 @@ class PacketAnalyzer:
         loss_rate = ((total_seen - total_successful) / total_seen) if total_seen else 0
         packets_failed = total_seen - total_successful
 
-        # Estimate power usage based on CPU usage as a proxy (placeholder logic)
-        # Here we simulate this by assuming a basic scaling factor
+        # Estimate power usage based on CPU usage percentage
         process = psutil.Process()
-        power_usage = process.cpu_percent(interval=0.1)  # Approximate CPU usage %
+        cpu_usage = process.cpu_percent(interval=0.1)
+        estimated_power = 1.4 + (2.3 * (cpu_usage / 100))  # Estimate power (W) based on PiDramble data
 
         if not latency_recorded:
             print(f"[WARN] No latency recorded for {algorithm} - {application}")
@@ -114,5 +114,5 @@ class PacketAnalyzer:
             "total_packets": total_seen,
             "successful": total_successful,
             "packet_loss": packets_failed,
-            "estimated_power_usage": power_usage
+            "estimated_power_usage": round(estimated_power, 2)
         }
