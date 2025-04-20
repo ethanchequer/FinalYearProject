@@ -1,21 +1,34 @@
-import matplotlib.pyplot as plt
-import pandas as pd
-import os
+"""
+visualizations.py
 
+This module contains the VisualizationManager class, responsible for generating performance and resource usage plots.
+It supports plotting throughput and latency comparisons, generating radar charts, and preparing bar chart datasets for
+frontend visualization.
+"""
+
+import matplotlib.pyplot as plt  # Used for creating graphs
+import pandas as pd  # Used for data manipulation and analysis
+import os  # Used for handling file paths
+
+# The VisualizationManager class provides methods to generate visual representations of test results data
 class VisualizationManager:
+    # Initialize the manager with folders for data input and output plot images
     def __init__(self, data_folder="data", output_folder="static/plots"):
         self.data_folder = data_folder
         self.output_folder = output_folder
         os.makedirs(self.output_folder, exist_ok=True)
 
+    # Load CSV data file from the data folder
     def load_data(self, filename):
         path = os.path.join(self.data_folder, filename)
         return pd.read_csv(path)
 
+    # Generate a line plot comparing throughput (kbps) across algorithms and applications
     def generate_throughput_plot(self, df, output_filename="throughput_plot.png"):
         plt.figure()
         for app in df["application"].unique():
             subset = df[df["application"] == app]
+            # Plot throughput values for each application
             plt.plot(subset["algorithm"], subset["throughput_kbps"], marker="o", label=app)
 
         plt.title("Throughput Comparison")
@@ -27,6 +40,7 @@ class VisualizationManager:
         plt.close()
         return output_path
 
+    # Generate a line plot comparing latency (ms) across algorithms and applications
     def generate_latency_plot(self, df, output_filename="latency_plot.png"):
         plt.figure()
         for app in df["application"].unique():
@@ -42,9 +56,11 @@ class VisualizationManager:
         plt.close()
         return output_path
 
+    # Normalize a value to a percentage of the given max value (for consistent radar chart scaling)
     def normalize(self, value, max_value):
         return (value / max_value) * 100 if max_value else 0
 
+    # Generate radar chart data (resource or performance metrics) for all algorithms
     def generate_radar_chart_data(self, df, conn, metric_type="resource"):
         resource_metrics = {
             "cpu_usage": 100,
@@ -65,14 +81,10 @@ class VisualizationManager:
 
         if metric_type == "resource":
             radar_data["labels"] = ["CPU Usage (%)", "Memory Usage (MB)", "Power Usage (W)"]
-        else:
-            radar_data["labels"] = ["Latency (ms)", "Throughput (kbps)", "Execution Time (s)", "Packet Loss (%)"]
-
-        algorithms = df["algorithm"].unique().tolist()
-        for alg in algorithms:
-            alg_df = df[df["algorithm"] == alg]
-
-            if metric_type == "resource":
+            # Calculate and normalize average CPU, memory, and power usage per algorithm
+            algorithms = df["algorithm"].unique().tolist()
+            for alg in algorithms:
+                alg_df = df[df["algorithm"] == alg]
                 avg_cpu = self.normalize(alg_df["cpu_usage"].mean(), resource_metrics["cpu_usage"])
                 avg_memory = self.normalize(alg_df["memory_usage"].mean(), resource_metrics["memory_usage"])
                 avg_power = self.normalize(pd.to_numeric(alg_df["power_usage"].replace("Not Available", 0), errors='coerce').mean(), resource_metrics["power_usage"])
@@ -81,7 +93,12 @@ class VisualizationManager:
                     "label": alg,
                     "data": [avg_cpu, avg_memory, avg_power]
                 })
-            else:
+        else:
+            radar_data["labels"] = ["Latency (ms)", "Throughput (kbps)", "Execution Time (s)", "Packet Loss (%)"]
+            # Query the database for average performance metrics per algorithm and normalize
+            algorithms = df["algorithm"].unique().tolist()
+            for alg in algorithms:
+                alg_df = df[df["algorithm"] == alg]
                 latency_query = pd.read_sql_query("SELECT AVG(encryption_time_ms) FROM packet_latency WHERE algorithm = ?", conn, params=[alg])
                 avg_latency = self.normalize(latency_query.iloc[0, 0] or 0, performance_metrics["latency"])
                 throughput_query = pd.read_sql_query("SELECT AVG(throughput_kbps) FROM throughput_stats WHERE algorithm = ?", conn, params=[alg])
@@ -97,6 +114,7 @@ class VisualizationManager:
 
         return radar_data
 
+    # Prepare execution time data in bar chart format grouped by application and algorithm
     def generate_execution_bar_data(self, df):
         numeric_columns = df.select_dtypes(include=["number"]).columns
         combined_df = df.groupby(["application", "algorithm"])[numeric_columns].mean().reset_index()
@@ -108,6 +126,7 @@ class VisualizationManager:
         }
         datasets = []
 
+        # Create a dataset entry for each algorithm showing average execution time per application
         for alg in combined_df["algorithm"].unique():
             data = []
             for app in applications:
